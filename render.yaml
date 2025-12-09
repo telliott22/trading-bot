@@ -14,6 +14,10 @@ services:
     envVars:
       - key: OPENROUTER_API_KEY
         sync: false  # You'll set this manually in Render dashboard
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false  # Set in Render dashboard for notifications
+      - key: TELEGRAM_CHAT_ID
+        sync: false  # Set in Render dashboard for notifications
       - key: NODE_ENV
         value: production
 

@@ -2,10 +2,13 @@ import { PolymarketIngestion } from './ingestion';
 import { Pipeline } from './pipeline';
 import { Storage } from './storage';
 import { Notifier } from './notifications';
+import { State } from './state';
+import { Monitor } from './monitor';
 import { SingleMarket, MarketRelation } from './types';
 
 // How often to re-scan for new opportunities (in milliseconds)
 const RESCAN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const RESOLUTION_CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 async function main() {
     console.log("Starting Polymarket Agent...");
@@ -14,8 +17,12 @@ async function main() {
     const pipeline = new Pipeline();
     const storage = new Storage('../ui/public/predictions.csv');
     const notifier = new Notifier();
+    const state = new State();
+    const monitor = new Monitor(state, notifier);
 
-    // Track known opportunities to avoid duplicate notifications
+    console.log(`Loaded state: ${state.getOpportunityCount()} tracked opportunities (${state.getUnresolvedCount()} unresolved)`);
+
+    // Track known opportunities to avoid duplicate notifications (in-memory for session)
     const knownOpportunities = new Set<string>();
 
     async function runPipeline(markets: SingleMarket[]) {
@@ -39,6 +46,9 @@ async function main() {
                     if (!knownOpportunities.has(oppId)) {
                         knownOpportunities.add(oppId);
                         await storage.savePredictions([relation]);
+
+                        // Track in persistent state for resolution monitoring
+                        state.addOpportunity(relation);
 
                         // Send notification for new opportunity
                         await notifier.notifyNewOpportunity(relation);
@@ -72,6 +82,9 @@ async function main() {
     // Initial scan
     await scan();
 
+    // Check for any leader resolutions on startup
+    await monitor.checkLeaderResolutions();
+
     // Check if running as one-shot (cron) or continuous
     const isCronMode = process.env.CRON_MODE === 'true';
 
@@ -79,14 +92,22 @@ async function main() {
         console.log("Running in cron mode - exiting after single scan.");
         process.exit(0);
     } else {
-        console.log(`\nRunning in continuous mode. Next scan in ${RESCAN_INTERVAL_MS / 1000 / 60 / 60} hours.`);
+        console.log(`\nRunning in continuous mode.`);
+        console.log(`  - Opportunity scan: every ${RESCAN_INTERVAL_MS / 1000 / 60 / 60} hours`);
+        console.log(`  - Resolution check: every ${RESOLUTION_CHECK_INTERVAL_MS / 1000 / 60} minutes`);
 
-        // Schedule periodic rescans
+        // Schedule periodic opportunity scans
         setInterval(scan, RESCAN_INTERVAL_MS);
+
+        // Schedule more frequent resolution checks
+        setInterval(async () => {
+            await monitor.checkLeaderResolutions();
+        }, RESOLUTION_CHECK_INTERVAL_MS);
 
         // Keep process alive
         process.on('SIGINT', () => {
             console.log('\nShutting down agent...');
+            state.saveState();
             process.exit(0);
         });
     }
