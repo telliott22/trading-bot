@@ -1,0 +1,1 @@
+timestamp,market1Id,market2Id,market1Slug,market2Slug,market1Question,market2Question,market1YesPrice,market2YesPrice,relationshipType,confidenceScore,tradingRationale,expectedEdge,leaderId,followerId,timeGap,timeGapDays

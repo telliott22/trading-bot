@@ -18,10 +18,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# CSV data files (generated at runtime)
+# CSV data files (generated at runtime - agent local only)
 predictions.csv
 ui/public/predictions.csv
-dashboard/public/predictions.csv
+# Note: dashboard/public/predictions.csv is tracked (pushed by agent to GitHub)
 
 # IDE
 .vscode/
