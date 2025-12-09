@@ -66,6 +66,7 @@ export default function Dashboard() {
   const [minConfidence, setMinConfidence] = useState<string>("0.7");
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
     const CSV_URL = "https://raw.githubusercontent.com/telliott22/trading-bot/main/dashboard/public/predictions.csv";
@@ -78,6 +79,7 @@ export default function Dashboard() {
         complete: (results) => {
           const parsedData = results.data as Prediction[];
           setData(parsedData.filter((row) => row.market1Question));
+          setLastUpdated(new Date());
         },
         error: (err) => {
           console.error("Error fetching CSV:", err);
@@ -153,6 +155,11 @@ export default function Dashboard() {
     return `${Math.floor(hours / 24)}d`;
   };
 
+  const formatLastUpdated = (date: Date | null) => {
+    if (!date) return "Loading...";
+    return date.toLocaleString();
+  };
+
   // Build proper Polymarket URL
   const getMarketUrl = (slug?: string, id?: string) => {
     if (slug) {
@@ -192,7 +199,11 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <p className="text-xs text-zinc-500">Last updated</p>
+                <p className="text-sm text-zinc-300 font-mono">{formatLastUpdated(lastUpdated)}</p>
+              </div>
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                 <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
                 <span className="text-sm text-emerald-400 font-medium">
