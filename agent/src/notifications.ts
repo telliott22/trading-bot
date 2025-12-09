@@ -32,9 +32,16 @@ export class Notifier {
     }
 
     /**
+     * Escape special Markdown characters
+     */
+    private escapeMarkdown(text: string): string {
+        return text.replace(/[_*\[\]()~`>#+\-=|{}.!]/g, '\\$&');
+    }
+
+    /**
      * Send a message via Telegram
      */
-    private async send(message: string): Promise<void> {
+    private async send(message: string, useMarkdown: boolean = false): Promise<void> {
         if (!this.enabled) {
             console.log('Telegram disabled, skipping notification');
             return;
@@ -42,15 +49,21 @@ export class Notifier {
 
         try {
             console.log(`Sending Telegram notification...`);
+            const body: any = {
+                chat_id: this.chatId,
+                text: message,
+                disable_web_page_preview: true,
+            };
+
+            // Only use parse_mode if explicitly requested (avoids escaping issues)
+            if (useMarkdown) {
+                body.parse_mode = 'Markdown';
+            }
+
             const response = await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: this.chatId,
-                    text: message,
-                    parse_mode: 'Markdown',
-                    disable_web_page_preview: true,
-                }),
+                body: JSON.stringify(body),
             });
 
             const result = await response.json();
@@ -58,6 +71,11 @@ export class Notifier {
                 console.log('✓ Telegram notification sent successfully');
             } else {
                 console.error('✗ Telegram API error:', result);
+                // Retry without markdown if parsing failed
+                if (result.error_code === 400 && useMarkdown) {
+                    console.log('Retrying without Markdown...');
+                    await this.send(message.replace(/[*_`\[\]]/g, ''), false);
+                }
             }
         } catch (error) {
             console.error('✗ Telegram notification failed:', error);
@@ -76,22 +94,19 @@ export class Notifier {
             ? 'If YES → Bet YES'
             : 'If YES → Bet NO';
 
-        const message = `
-${emoji} *NEW OPPORTUNITY FOUND*
+        const message = `${emoji} NEW OPPORTUNITY FOUND
 
-*Leader:* ${leader.question}
-*Follower:* ${follower.question}
+Leader: ${leader.question}
+Follower: ${follower.question}
 
-*Relationship:* ${relation.relationshipType}
-*Confidence:* ${(relation.confidenceScore * 100).toFixed(0)}%
-*Time Gap:* ${relation.timeGap}
+Relationship: ${relation.relationshipType}
+Confidence: ${(relation.confidenceScore * 100).toFixed(0)}%
+Time Gap: ${relation.timeGap}
 
-*Strategy:* ${action}
-*Edge:* ${relation.expectedEdge || 'See dashboard'}
+Strategy: ${action}
 
-🔗 [Watch Leader](https://polymarket.com/event/${leader.slug})
-🎯 [Trade Follower](https://polymarket.com/event/${follower.slug})
-`;
+🔗 Leader: https://polymarket.com/event/${leader.slug}
+🎯 Follower: https://polymarket.com/event/${follower.slug}`;
 
         await this.send(message);
     }
@@ -111,20 +126,17 @@ ${emoji} *NEW OPPORTUNITY FOUND*
             betAction = leaderOutcome === 'YES' ? 'BUY NO' : 'BUY YES';
         }
 
-        const message = `
-🚨 *LEADER RESOLVED - TIME TO TRADE!*
+        const message = `🚨 LEADER RESOLVED - TIME TO TRADE!
 
-*Leader Result:* ${leader.question}
-➡️ Resolved: *${leaderOutcome}*
+Leader: ${leader.question}
+Result: ${leaderOutcome}
 
-*Action Required:*
-🎯 *${betAction}* on follower market:
+ACTION: ${betAction} on follower:
 ${follower.question}
 
-*Confidence:* ${(relation.confidenceScore * 100).toFixed(0)}%
+Confidence: ${(relation.confidenceScore * 100).toFixed(0)}%
 
-👉 [TRADE NOW](https://polymarket.com/event/${follower.slug})
-`;
+👉 TRADE NOW: https://polymarket.com/event/${follower.slug}`;
 
         await this.send(message);
     }
