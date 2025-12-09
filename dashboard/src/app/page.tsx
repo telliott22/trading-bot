@@ -106,11 +106,11 @@ export default function Dashboard() {
     const minConf = parseFloat(minConfidence);
     result = result.filter((row) => Number(row.confidenceScore) >= minConf);
 
-    // Sort by time gap (best opportunities first - largest gaps)
+    // Sort by time gap (most urgent first - smallest gaps at top)
     result.sort((a, b) => {
-      const gapA = parseFloat(a.timeGapDays || '0');
-      const gapB = parseFloat(b.timeGapDays || '0');
-      return gapB - gapA;
+      const gapA = parseFloat(a.timeGapDays || '9999');
+      const gapB = parseFloat(b.timeGapDays || '9999');
+      return gapA - gapB;
     });
 
     return result;

@@ -5,20 +5,29 @@
  * 2. Leader market resolves (time to trade!)
  */
 
-import { MarketRelation } from './types';
+import * as dotenv from 'dotenv';
+dotenv.config();
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+import { MarketRelation } from './types';
 
 export class Notifier {
     private enabled: boolean;
+    private botToken: string;
+    private chatId: string;
 
     constructor() {
-        this.enabled = !!(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID);
+        this.botToken = process.env.TELEGRAM_BOT_TOKEN || '';
+        this.chatId = process.env.TELEGRAM_CHAT_ID || '';
+        this.enabled = !!(this.botToken && this.chatId);
+
         if (this.enabled) {
             console.log('✓ Telegram notifications enabled');
+            console.log(`  Bot token: ${this.botToken.substring(0, 10)}...`);
+            console.log(`  Chat ID: ${this.chatId}`);
         } else {
             console.log('⚠ Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)');
+            console.log(`  TELEGRAM_BOT_TOKEN: ${this.botToken ? 'set' : 'missing'}`);
+            console.log(`  TELEGRAM_CHAT_ID: ${this.chatId ? 'set' : 'missing'}`);
         }
     }
 
@@ -26,21 +35,32 @@ export class Notifier {
      * Send a message via Telegram
      */
     private async send(message: string): Promise<void> {
-        if (!this.enabled) return;
+        if (!this.enabled) {
+            console.log('Telegram disabled, skipping notification');
+            return;
+        }
 
         try {
-            await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            console.log(`Sending Telegram notification...`);
+            const response = await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    chat_id: TELEGRAM_CHAT_ID,
+                    chat_id: this.chatId,
                     text: message,
                     parse_mode: 'Markdown',
                     disable_web_page_preview: true,
                 }),
             });
+
+            const result = await response.json();
+            if (result.ok) {
+                console.log('✓ Telegram notification sent successfully');
+            } else {
+                console.error('✗ Telegram API error:', result);
+            }
         } catch (error) {
-            console.error('Telegram notification failed:', error);
+            console.error('✗ Telegram notification failed:', error);
         }
     }
 

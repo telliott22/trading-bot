@@ -14,7 +14,7 @@ export class Pipeline {
     private clustering: SemanticClustering;
 
     // === SPEC REQUIREMENTS ===
-    private readonly MIN_TIME_GAP_DAYS = 1;  // Minimum gap to allow trading time
+    private readonly MIN_TIME_GAP_DAYS = 0;  // No minimum gap - show all opportunities
     private readonly MIN_CONFIDENCE = 0.5;   // Only save signals with confidence ≥0.5
     private readonly MAX_PAIRS_PER_CLUSTER = 10; // Limit API calls
 
