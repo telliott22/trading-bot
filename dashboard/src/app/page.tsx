@@ -68,8 +68,10 @@ export default function Dashboard() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   useEffect(() => {
+    const CSV_URL = "https://raw.githubusercontent.com/telliott22/trading-bot/main/dashboard/public/predictions.csv";
+
     const fetchData = () => {
-      Papa.parse("/predictions.csv", {
+      Papa.parse(CSV_URL, {
         download: true,
         header: true,
         skipEmptyLines: true,
@@ -84,7 +86,7 @@ export default function Dashboard() {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 5000);
+    const interval = setInterval(fetchData, 60000); // Check every minute (GitHub caches for ~5 min)
     return () => clearInterval(interval);
   }, []);
 

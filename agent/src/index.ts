@@ -62,6 +62,9 @@ async function main() {
 
         console.log(`\n✓ Scan complete. Found ${newOpportunitiesCount} NEW opportunities.\n`);
 
+        // Push CSV to GitHub for dashboard access
+        await storage.pushToGitHub();
+
         if (newOpportunitiesCount > 0) {
             await notifier.notifyStatus(`Scan complete: ${newOpportunitiesCount} new opportunities found`);
         }
