@@ -21,6 +21,20 @@ This project implements a strategy from academic research on prediction market i
    - New trading opportunities are discovered
    - A leader market resolves (time to trade the follower!)
 
+## Telegram Bot
+
+Get real-time alerts on your phone when trading opportunities arise.
+
+**Setup:**
+1. Message [@BotFather](https://t.me/BotFather) on Telegram and send `/newbot`
+2. Follow the prompts to create your bot and get your `TELEGRAM_BOT_TOKEN`
+3. Start a chat with your new bot and send any message
+4. Visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` to find your `TELEGRAM_CHAT_ID`
+
+**Alert Types:**
+- 📈 **New Opportunity** - When a high-confidence leader-follower pair is discovered
+- 🚨 **Leader Resolved** - When a leader market closes, telling you exactly what to trade
+
 ## Project Structure
 
 ```
