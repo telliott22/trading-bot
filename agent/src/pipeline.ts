@@ -135,41 +135,37 @@ export class Pipeline {
             // === CRITICAL: Distinguish same-event vs different-event pairs ===
             const prompt = `You are an expert prediction market trader. Analyze these two markets for a **leader-follower trading strategy**.
 
-**CRITICAL DISTINCTION:**
-- ❌ SAME EVENT (different timeframes): "Maduro out 2025?" vs "Maduro out 2026?" → USELESS! If Maduro leaves in 2025, BOTH markets close/resolve YES. No trading window.
-- ✅ DIFFERENT EVENTS (causal link): "Fed cuts Dec?" vs "Fed cuts Jan?" → ACTIONABLE! These are different Fed meetings. Dec cut makes Jan cut more likely, but doesn't auto-resolve it.
+**REJECT THESE (NOT ACTIONABLE):**
+❌ SAME EVENT with different timeframes: "X by 2025?" vs "X by 2026?" - both resolve together
+❌ MUTUALLY EXCLUSIVE outcomes of same event: "680-719 tweets" vs "720-759 tweets" - only one can be YES
+❌ Different numeric ranges of same metric: views, prices, counts with different brackets
+
+**ACCEPT THESE (ACTIONABLE):**
+✅ DIFFERENT EVENTS with causal link: "Fed cuts Dec?" vs "Fed cuts Jan?" - separate meetings
+✅ Prerequisite → Outcome: "Win primary?" vs "Win general?" - first enables second
 
 **LEADER MARKET** (resolves FIRST on ${new Date(leader.endTime).toLocaleDateString()}):
 - Question: ${leader.question}
 - YES price: ${leader.yesPrice?.toFixed(2) || 'unknown'}
 
 **FOLLOWER MARKET** (resolves LATER on ${new Date(follower.endTime).toLocaleDateString()}):
-- Question: ${follower.question}  
+- Question: ${follower.question}
 - YES price: ${follower.yesPrice?.toFixed(2) || 'unknown'}
 
 **TIME GAP**: ${Math.floor(timeInfo.days)} days
 
-**ANALYSIS QUESTIONS:**
-1. Are these the SAME EVENT with different deadlines? (If yes → mark as SAME_EVENT_REJECT)
-2. Are these DIFFERENT EVENTS with a causal/logical relationship?
-3. If leader resolves YES, does the follower market STAY OPEN for trading?
-4. What would you bet on the follower based on leader's outcome?
+**KEY QUESTION:** If leader resolves YES, does the follower market STAY OPEN with uncertainty? Or is the follower's outcome already determined/excluded?
 
 **OUTPUT RULES:**
-- "SAME_EVENT_REJECT": Same underlying event, different timeframes → NOT actionable
-- "SAME_OUTCOME": Different events, causally linked, leader YES → bet follower YES
-- "DIFFERENT_OUTCOME": Different events, causally linked, leader YES → bet follower NO
-- "UNRELATED": No meaningful causal relationship
-
-**Examples:**
-- "Maduro out 2025?" vs "Maduro out 2026?" → SAME_EVENT_REJECT (same person, same event)
-- "Trump wins Iowa?" vs "Trump wins nomination?" → SAME_OUTCOME (different events, causally linked)
-- "Fed cuts Dec?" vs "Fed raises Jan?" → DIFFERENT_OUTCOME (different meetings, inverse policy)
-- "Fed cuts Dec?" vs "Lakers win championship?" → UNRELATED
+- "SAME_EVENT_REJECT": Same event OR mutually exclusive brackets → NOT actionable
+- "SAME_OUTCOME": Different events, leader YES → bet follower YES
+- "DIFFERENT_OUTCOME": Different events, leader YES → bet follower NO
+- "UNRELATED": No causal relationship
 
 **Output JSON only:**
 {
     "isSameEvent": true/false,
+    "areMutuallyExclusive": true/false,
     "relationshipType": "SAME_EVENT_REJECT" | "SAME_OUTCOME" | "DIFFERENT_OUTCOME" | "UNRELATED",
     "confidenceScore": 0.0-1.0,
     "tradingRationale": "If leader resolves YES, [action]. If leader resolves NO, [action].",

@@ -103,6 +103,12 @@ export default function Dashboard() {
       result = result.filter((row) => row.relationshipType !== "UNRELATED");
     }
 
+    // Only show pairs with actual leader-follower pattern (time gap > 0)
+    result = result.filter((row) => {
+      const gap = parseFloat(row.timeGapDays || '0');
+      return gap > 0;
+    });
+
     const minConf = parseFloat(minConfidence);
     result = result.filter((row) => Number(row.confidenceScore) >= minConf);
 

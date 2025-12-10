@@ -22,9 +22,6 @@ async function main() {
 
     console.log(`Loaded state: ${state.getOpportunityCount()} tracked opportunities (${state.getUnresolvedCount()} unresolved)`);
 
-    // Send startup notification
-    await notifier.notifyStatus(`🚀 Agent started! Scanning for opportunities...`);
-
     // Track known opportunities to avoid duplicate notifications (in-memory for session)
     const knownOpportunities = new Set<string>();
 
