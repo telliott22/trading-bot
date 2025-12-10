@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { Langfuse } from 'langfuse';
 import { SingleMarket, MarketRelation, EnrichedMarket } from './types';
 import { SemanticClustering } from './clustering';
 import * as dotenv from 'dotenv';
@@ -6,12 +7,13 @@ dotenv.config();
 
 /**
  * Pipeline for analyzing market relationships
- * Per specs: "Relationship Discovery MCP finds same-outcome (correlated) 
+ * Per specs: "Relationship Discovery MCP finds same-outcome (correlated)
  * and different-outcome (anti-correlated) links with confidence scores"
  */
 export class Pipeline {
     private openai: OpenAI;
     private clustering: SemanticClustering;
+    private langfuse: Langfuse | null = null;
 
     // === SPEC REQUIREMENTS ===
     private readonly MIN_TIME_GAP_DAYS = 0;  // No minimum gap - show all opportunities
@@ -32,6 +34,18 @@ export class Pipeline {
             },
         });
         this.clustering = new SemanticClustering();
+
+        // Initialize Langfuse for tracing
+        if (process.env.LANGFUSE_SECRET_KEY && process.env.LANGFUSE_PUBLIC_KEY) {
+            this.langfuse = new Langfuse({
+                secretKey: process.env.LANGFUSE_SECRET_KEY,
+                publicKey: process.env.LANGFUSE_PUBLIC_KEY,
+                baseUrl: process.env.LANGFUSE_BASE_URL || 'https://cloud.langfuse.com',
+            });
+            console.log('✓ Langfuse tracing enabled');
+        } else {
+            console.log('⚠ Langfuse not configured (set LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY)');
+        }
     }
 
     /**
@@ -127,13 +141,25 @@ export class Pipeline {
         m2: EnrichedMarket,
         timeInfo: { days: number; gap: string; leaderId: string; followerId: string }
     ): Promise<MarketRelation | null> {
+        // Create Langfuse trace for this analysis
+        const trace = this.langfuse?.trace({
+            name: 'analyze-market-pair',
+            metadata: {
+                market1Id: m1.id,
+                market2Id: m2.id,
+                timeGapDays: timeInfo.days,
+            },
+        });
+
         try {
             // Determine which is leader/follower
             const leader = timeInfo.leaderId === m1.id ? m1 : m2;
             const follower = timeInfo.leaderId === m1.id ? m2 : m1;
 
+            const systemPrompt = "You are an expert prediction market analyst. Your goal is to identify high-confidence trading opportunities using the leader-follower strategy. Be conservative - only mark relationships as SAME_OUTCOME or DIFFERENT_OUTCOME if you are confident there is a real, actionable relationship.";
+
             // === CRITICAL: Distinguish same-event vs different-event pairs ===
-            const prompt = `You are an expert prediction market trader. Analyze these two markets for a **leader-follower trading strategy**.
+            const userPrompt = `You are an expert prediction market trader. Analyze these two markets for a **leader-follower trading strategy**.
 
 **REJECT THESE (NOT ACTIONABLE):**
 ❌ SAME EVENT with different timeframes: "X by 2025?" vs "X by 2026?" - both resolve together
@@ -172,14 +198,27 @@ export class Pipeline {
     "expectedEdge": "Why this trade profits from information asymmetry"
 }`;
 
+            // Create generation span for the LLM call
+            const generation = trace?.generation({
+                name: 'market-pair-analysis',
+                model: 'openai/gpt-4-turbo',
+                input: {
+                    system: systemPrompt,
+                    user: userPrompt,
+                },
+                metadata: {
+                    leaderQuestion: leader.question,
+                    followerQuestion: follower.question,
+                    leaderEndDate: leader.endTime,
+                    followerEndDate: follower.endTime,
+                },
+            });
+
             const response = await this.openai.chat.completions.create({
                 model: "openai/gpt-4-turbo",  // Use GPT-4 for better analysis
                 messages: [
-                    {
-                        role: "system",
-                        content: "You are an expert prediction market analyst. Your goal is to identify high-confidence trading opportunities using the leader-follower strategy. Be conservative - only mark relationships as SAME_OUTCOME or DIFFERENT_OUTCOME if you are confident there is a real, actionable relationship."
-                    },
-                    { role: "user", content: prompt }
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
                 ],
                 temperature: 0.3, // Lower temperature for more consistent analysis
             });
@@ -190,6 +229,31 @@ export class Pipeline {
             content = content.replace(/```json\n?/g, '').replace(/```/g, '').trim();
 
             const result = JSON.parse(content);
+
+            // End generation with output
+            generation?.end({
+                output: result,
+                usage: {
+                    promptTokens: response.usage?.prompt_tokens,
+                    completionTokens: response.usage?.completion_tokens,
+                    totalTokens: response.usage?.total_tokens,
+                },
+            });
+
+            // Score the trace based on actionability
+            const isActionable = result.relationshipType !== 'UNRELATED' &&
+                result.relationshipType !== 'SAME_EVENT_REJECT' &&
+                result.confidenceScore >= this.MIN_CONFIDENCE;
+
+            trace?.score({
+                name: 'actionable',
+                value: isActionable ? 1 : 0,
+            });
+
+            trace?.score({
+                name: 'confidence',
+                value: result.confidenceScore || 0,
+            });
 
             return {
                 market1: m1,
@@ -208,7 +272,21 @@ export class Pipeline {
 
         } catch (error) {
             console.error("Error analyzing pair:", error);
+            trace?.score({
+                name: 'error',
+                value: 1,
+                comment: String(error),
+            });
             return null;
+        }
+    }
+
+    /**
+     * Flush Langfuse events (call at end of pipeline run)
+     */
+    public async flush(): Promise<void> {
+        if (this.langfuse) {
+            await this.langfuse.flushAsync();
         }
     }
 }

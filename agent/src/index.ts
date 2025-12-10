@@ -62,6 +62,9 @@ async function main() {
 
         console.log(`\n✓ Scan complete. Found ${newOpportunitiesCount} NEW opportunities.\n`);
 
+        // Flush Langfuse traces
+        await pipeline.flush();
+
         // Push CSV to GitHub for dashboard access
         await storage.pushToGitHub();
 
