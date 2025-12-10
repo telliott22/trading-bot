@@ -56,6 +56,7 @@ export class Storage {
                 { id: 'expectedEdge', title: 'expectedEdge' },
                 { id: 'leaderId', title: 'leaderId' },
                 { id: 'followerId', title: 'followerId' },
+                { id: 'leaderEndDate', title: 'leaderEndDate' },
                 { id: 'timeGap', title: 'timeGap' },
                 { id: 'timeGapDays', title: 'timeGapDays' }
             ],
@@ -66,25 +67,31 @@ export class Storage {
     public async savePredictions(predictions: MarketRelation[]) {
         if (predictions.length === 0) return;
 
-        const records = predictions.map(p => ({
-            timestamp: p.timestamp,
-            market1Id: p.market1.id,
-            market2Id: p.market2.id,
-            market1Slug: p.market1.slug || p.market1.id,
-            market2Slug: p.market2.slug || p.market2.id,
-            market1Question: p.market1.question,
-            market2Question: p.market2.question,
-            market1YesPrice: p.market1.yesPrice?.toFixed(2) || '',
-            market2YesPrice: p.market2.yesPrice?.toFixed(2) || '',
-            relationshipType: p.relationshipType,
-            confidenceScore: p.confidenceScore,
-            tradingRationale: p.tradingRationale || p.rationale,
-            expectedEdge: p.expectedEdge || '',
-            leaderId: p.leaderId,
-            followerId: p.followerId,
-            timeGap: p.timeGap,
-            timeGapDays: p.timeGapDays?.toFixed(1) || ''
-        }));
+        const records = predictions.map(p => {
+            // Find leader market to get end date
+            const leader = p.leaderId === p.market1.id ? p.market1 : p.market2;
+
+            return {
+                timestamp: p.timestamp,
+                market1Id: p.market1.id,
+                market2Id: p.market2.id,
+                market1Slug: p.market1.slug || p.market1.id,
+                market2Slug: p.market2.slug || p.market2.id,
+                market1Question: p.market1.question,
+                market2Question: p.market2.question,
+                market1YesPrice: p.market1.yesPrice?.toFixed(2) || '',
+                market2YesPrice: p.market2.yesPrice?.toFixed(2) || '',
+                relationshipType: p.relationshipType,
+                confidenceScore: p.confidenceScore,
+                tradingRationale: p.tradingRationale || p.rationale,
+                expectedEdge: p.expectedEdge || '',
+                leaderId: p.leaderId,
+                followerId: p.followerId,
+                leaderEndDate: leader.endTime || '',
+                timeGap: p.timeGap,
+                timeGapDays: p.timeGapDays?.toFixed(1) || ''
+            };
+        });
 
         // Add to in-memory records
         this.allRecords.push(...records);

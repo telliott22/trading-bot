@@ -2,6 +2,8 @@
 
 An AI-powered trading agent that identifies **leader-follower opportunities** on [Polymarket](https://polymarket.com) prediction markets.
 
+**Live Dashboard:** [trading-bot-hazel.vercel.app](https://trading-bot-hazel.vercel.app/)
+
 ## What is this?
 
 This project implements a strategy from academic research on prediction market inefficiencies ([Arxiv Paper](https://arxiv.org/pdf/2512.02436)). The core insight:

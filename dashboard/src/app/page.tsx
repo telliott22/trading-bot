@@ -52,6 +52,7 @@ interface Prediction {
   expectedEdge?: string;
   leaderId?: string;
   followerId?: string;
+  leaderEndDate?: string;
   timeGap?: string;
   timeGapDays?: string;
 }
@@ -112,11 +113,11 @@ export default function Dashboard() {
     const minConf = parseFloat(minConfidence);
     result = result.filter((row) => Number(row.confidenceScore) >= minConf);
 
-    // Sort by time gap (most urgent first - smallest gaps at top)
+    // Sort by leader end date (soonest first - most urgent at top)
     result.sort((a, b) => {
-      const gapA = parseFloat(a.timeGapDays || '9999');
-      const gapB = parseFloat(b.timeGapDays || '9999');
-      return gapA - gapB;
+      const dateA = a.leaderEndDate ? new Date(a.leaderEndDate).getTime() : Infinity;
+      const dateB = b.leaderEndDate ? new Date(b.leaderEndDate).getTime() : Infinity;
+      return dateA - dateB;
     });
 
     return result;
@@ -387,8 +388,8 @@ export default function Dashboard() {
                   <TableHead className="text-zinc-500 font-medium w-24">
                     Confidence
                   </TableHead>
-                  <TableHead className="text-zinc-500 font-medium w-28">
-                    Strategy
+                  <TableHead className="text-zinc-500 font-medium w-32">
+                    Leader Ends
                   </TableHead>
                   <TableHead className="text-zinc-500 font-medium w-48">
                     Trade Links
@@ -489,7 +490,16 @@ export default function Dashboard() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            {hasLeader ? (
+                            {hasLeader && row.leaderEndDate ? (
+                              <div className="flex flex-col text-blue-400">
+                                <span className="text-sm font-medium">
+                                  {new Date(row.leaderEndDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                                <span className="text-xs text-zinc-500">
+                                  {row.timeGap} gap
+                                </span>
+                              </div>
+                            ) : hasLeader ? (
                               <div className="flex items-center gap-1.5 text-blue-400">
                                 <Clock className="w-4 h-4 shrink-0" />
                                 <span className="text-sm font-medium whitespace-nowrap">
