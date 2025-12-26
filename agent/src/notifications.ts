@@ -106,7 +106,9 @@ Time Gap: ${relation.timeGap}
 Strategy: ${action}
 
 🔗 Leader: https://polymarket.com/event/${leader.slug}
-🎯 Follower: https://polymarket.com/event/${follower.slug}`;
+🎯 Follower: https://polymarket.com/event/${follower.slug}
+
+📊 Dashboard: https://trading-bot-hazel.vercel.app/`;
 
         await this.send(message);
     }
