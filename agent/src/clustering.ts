@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { SingleMarket, EnrichedMarket } from './types';
+import { State } from './state';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
@@ -36,6 +37,100 @@ export class SemanticClustering {
             console.warn("Embedding API not available, falling back to keyword clustering");
             return [];
         }
+    }
+
+    /**
+     * Generate embeddings with caching - only calls API for uncached markets
+     */
+    public async generateEmbeddingsWithCache(
+        markets: SingleMarket[],
+        state: State
+    ): Promise<{ embeddings: number[][]; cacheHits: number; apiCalls: number }> {
+        const embeddings: (number[] | null)[] = new Array(markets.length).fill(null);
+        const uncachedMarkets: { market: SingleMarket; index: number }[] = [];
+        let cacheHits = 0;
+
+        // Check cache for each market
+        for (let i = 0; i < markets.length; i++) {
+            const market = markets[i];
+            const cached = state.getEmbedding(market.id);
+
+            if (cached) {
+                embeddings[i] = cached;
+                cacheHits++;
+            } else {
+                uncachedMarkets.push({ market, index: i });
+            }
+        }
+
+        // Generate embeddings for uncached markets
+        if (uncachedMarkets.length > 0) {
+            console.log(`Generating embeddings for ${uncachedMarkets.length} new markets (${cacheHits} cached)`);
+            const newEmbeddings = await this.generateEmbeddings(
+                uncachedMarkets.map(({ market }) => market.question)
+            );
+
+            // Save to cache and result array
+            for (let j = 0; j < uncachedMarkets.length; j++) {
+                const { market, index } = uncachedMarkets[j];
+                const embedding = newEmbeddings[j];
+
+                if (embedding) {
+                    embeddings[index] = embedding;
+                    state.saveEmbedding(market.id, embedding);
+                }
+            }
+        } else {
+            console.log(`All ${cacheHits} embeddings loaded from cache`);
+        }
+
+        return {
+            embeddings: embeddings.filter((e): e is number[] => e !== null),
+            cacheHits,
+            apiCalls: uncachedMarkets.length,
+        };
+    }
+
+    /**
+     * Cluster markets using pre-computed embeddings
+     */
+    public async clusterMarketsWithEmbeddings(
+        markets: SingleMarket[],
+        embeddings: number[][]
+    ): Promise<Map<string, EnrichedMarket[]>> {
+        const clusters = new Map<string, EnrichedMarket[]>();
+
+        console.log(`Clustering ${markets.length} markets...`);
+
+        if (embeddings.length === markets.length && embeddings.length > 0) {
+            // Use embedding-based clustering
+            const k = Math.max(5, Math.floor(markets.length / 10)); // K ≈ N/10 per specs
+            console.log(`Using semantic clustering with K=${k} clusters`);
+
+            const assignments = this.kMeansClustering(embeddings, k);
+
+            markets.forEach((m, i) => {
+                const clusterId = `cluster_${assignments[i]}`;
+                const cluster = clusters.get(clusterId) || [];
+                cluster.push({ ...m, clusterId, embedding: embeddings[i] });
+                clusters.set(clusterId, cluster);
+            });
+
+            // Label clusters after grouping
+            await this.labelClusters(clusters);
+        } else {
+            // Fallback to improved keyword clustering
+            console.log("Using fallback keyword clustering");
+            this.keywordClustering(markets, clusters);
+        }
+
+        // Log cluster sizes
+        console.log(`Created ${clusters.size} clusters:`);
+        for (const [id, members] of clusters) {
+            console.log(`  ${id}: ${members.length} markets`);
+        }
+
+        return clusters;
     }
 
     /**

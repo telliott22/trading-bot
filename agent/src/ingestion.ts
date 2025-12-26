@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import { Trade, SingleMarket } from './types';
+import { State } from './state';
 
 export class PolymarketIngestion {
     private ws: WebSocket | null = null;
@@ -139,6 +140,27 @@ export class PolymarketIngestion {
 
         console.log(`\n✓ Total qualifying markets: ${collectedMarkets.length} (>$${MIN_VOLUME.toLocaleString()}, >${MIN_DAYS_TO_END} days)\n`);
         return collectedMarkets;
+    }
+
+    /**
+     * Fetch active markets and identify which ones are new vs. previously seen
+     */
+    public async fetchActiveMarketsIncremental(state: State): Promise<{
+        allMarkets: SingleMarket[];
+        newMarkets: SingleMarket[];
+    }> {
+        const allMarkets = await this.fetchActiveMarkets();
+        const newMarkets: SingleMarket[] = [];
+
+        for (const market of allMarkets) {
+            if (state.isMarketNew(market.id)) {
+                newMarkets.push(market);
+            }
+            // Mark all markets as seen (updates firstSeen for new ones)
+            state.markMarketSeen(market);
+        }
+
+        return { allMarkets, newMarkets };
     }
 
     public connect() {

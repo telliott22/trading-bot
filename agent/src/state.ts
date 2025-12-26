@@ -1,13 +1,38 @@
 /**
  * State Management Module
- * Persists tracked opportunities to JSON file for monitoring leader resolutions
+ * Persists tracked opportunities and caches for intelligent incremental scanning
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { MarketRelation } from './types';
+import { MarketRelation, SingleMarket } from './types';
 
 const STATE_FILE = path.join(__dirname, '..', 'predictions_state.json');
+
+// Cache configuration
+const MARKET_RETENTION_DAYS = 30; // Keep market data for 30 days after end date
+
+// ============================================
+// Cache Types for Intelligent Scanning
+// ============================================
+
+export interface SeenMarket {
+    question: string;
+    endTime: string;
+    firstSeen: string;
+}
+
+export interface AnalyzedPair {
+    result: 'SAME_OUTCOME' | 'DIFFERENT_OUTCOME' | 'UNRELATED' | 'SAME_EVENT_REJECT';
+    confidence: number;
+    analyzedAt: string;
+}
+
+export interface CacheState {
+    seenMarkets: { [marketId: string]: SeenMarket };
+    analyzedPairs: { [pairId: string]: AnalyzedPair };  // pairId = sorted "id1-id2"
+    embeddings: { [marketId: string]: number[] };
+}
 
 export interface TrackedOpportunity {
     id: string;  // market1.id-market2.id
@@ -21,6 +46,8 @@ export interface TrackedOpportunity {
 export interface OpportunityState {
     opportunities: TrackedOpportunity[];
     lastChecked: string;
+    // Cache for intelligent incremental scanning
+    cache?: CacheState;
 }
 
 export class State {
@@ -34,7 +61,12 @@ export class State {
         try {
             if (fs.existsSync(STATE_FILE)) {
                 const data = fs.readFileSync(STATE_FILE, 'utf-8');
-                return JSON.parse(data);
+                const state = JSON.parse(data);
+                // Ensure cache exists (for backward compatibility)
+                if (!state.cache) {
+                    state.cache = this.createEmptyCache();
+                }
+                return state;
             }
         } catch (error) {
             console.error('Error loading state file, starting fresh:', error);
@@ -42,6 +74,15 @@ export class State {
         return {
             opportunities: [],
             lastChecked: new Date().toISOString(),
+            cache: this.createEmptyCache(),
+        };
+    }
+
+    private createEmptyCache(): CacheState {
+        return {
+            seenMarkets: {},
+            analyzedPairs: {},
+            embeddings: {},
         };
     }
 
@@ -97,5 +138,188 @@ export class State {
 
     public getUnresolvedCount(): number {
         return this.getUnresolvedOpportunities().length;
+    }
+
+    // ============================================
+    // Market Cache Methods
+    // ============================================
+
+    /**
+     * Check if a market has been seen before
+     */
+    public isMarketNew(marketId: string): boolean {
+        return !this.state.cache?.seenMarkets[marketId];
+    }
+
+    /**
+     * Mark a market as seen (called for all markets in current scan)
+     */
+    public markMarketSeen(market: SingleMarket): void {
+        if (!this.state.cache) {
+            this.state.cache = this.createEmptyCache();
+        }
+
+        // Only add if not already seen
+        if (!this.state.cache.seenMarkets[market.id]) {
+            this.state.cache.seenMarkets[market.id] = {
+                question: market.question,
+                endTime: market.endTime || '',
+                firstSeen: new Date().toISOString(),
+            };
+        }
+    }
+
+    /**
+     * Get count of seen markets
+     */
+    public getSeenMarketCount(): number {
+        return Object.keys(this.state.cache?.seenMarkets || {}).length;
+    }
+
+    // ============================================
+    // Pair Analysis Cache Methods
+    // ============================================
+
+    /**
+     * Create a canonical pair ID (sorted alphabetically for consistency)
+     */
+    private canonicalPairId(id1: string, id2: string): string {
+        return [id1, id2].sort().join('-');
+    }
+
+    /**
+     * Check if a pair has already been analyzed
+     */
+    public isPairAnalyzed(id1: string, id2: string): boolean {
+        const pairId = this.canonicalPairId(id1, id2);
+        return !!this.state.cache?.analyzedPairs[pairId];
+    }
+
+    /**
+     * Get cached pair analysis result
+     */
+    public getPairResult(id1: string, id2: string): AnalyzedPair | null {
+        const pairId = this.canonicalPairId(id1, id2);
+        return this.state.cache?.analyzedPairs[pairId] || null;
+    }
+
+    /**
+     * Save pair analysis result to cache
+     */
+    public savePairResult(
+        id1: string,
+        id2: string,
+        result: AnalyzedPair['result'],
+        confidence: number
+    ): void {
+        if (!this.state.cache) {
+            this.state.cache = this.createEmptyCache();
+        }
+
+        const pairId = this.canonicalPairId(id1, id2);
+        this.state.cache.analyzedPairs[pairId] = {
+            result,
+            confidence,
+            analyzedAt: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Get count of analyzed pairs
+     */
+    public getAnalyzedPairCount(): number {
+        return Object.keys(this.state.cache?.analyzedPairs || {}).length;
+    }
+
+    // ============================================
+    // Embedding Cache Methods
+    // ============================================
+
+    /**
+     * Get cached embedding for a market
+     */
+    public getEmbedding(marketId: string): number[] | null {
+        return this.state.cache?.embeddings[marketId] || null;
+    }
+
+    /**
+     * Save embedding to cache
+     */
+    public saveEmbedding(marketId: string, embedding: number[]): void {
+        if (!this.state.cache) {
+            this.state.cache = this.createEmptyCache();
+        }
+        this.state.cache.embeddings[marketId] = embedding;
+    }
+
+    /**
+     * Get count of cached embeddings
+     */
+    public getEmbeddingCount(): number {
+        return Object.keys(this.state.cache?.embeddings || {}).length;
+    }
+
+    // ============================================
+    // Cache Cleanup Methods
+    // ============================================
+
+    /**
+     * Remove stale cache entries for markets that have ended
+     */
+    public cleanupEndedMarkets(): void {
+        if (!this.state.cache) return;
+
+        const now = Date.now();
+        const retentionMs = MARKET_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+        let cleanedMarkets = 0;
+        let cleanedPairs = 0;
+        let cleanedEmbeddings = 0;
+
+        // Find markets to remove (ended + retention period passed)
+        const marketsToRemove = new Set<string>();
+        for (const [marketId, market] of Object.entries(this.state.cache.seenMarkets)) {
+            if (market.endTime) {
+                const endTime = new Date(market.endTime).getTime();
+                if (endTime + retentionMs < now) {
+                    marketsToRemove.add(marketId);
+                }
+            }
+        }
+
+        // Remove stale markets
+        for (const marketId of marketsToRemove) {
+            delete this.state.cache.seenMarkets[marketId];
+            cleanedMarkets++;
+
+            // Also remove embedding
+            if (this.state.cache.embeddings[marketId]) {
+                delete this.state.cache.embeddings[marketId];
+                cleanedEmbeddings++;
+            }
+        }
+
+        // Remove pairs involving removed markets
+        for (const pairId of Object.keys(this.state.cache.analyzedPairs)) {
+            const [id1, id2] = pairId.split('-');
+            if (marketsToRemove.has(id1) || marketsToRemove.has(id2)) {
+                delete this.state.cache.analyzedPairs[pairId];
+                cleanedPairs++;
+            }
+        }
+
+        if (cleanedMarkets > 0 || cleanedPairs > 0 || cleanedEmbeddings > 0) {
+            console.log(`Cache cleanup: removed ${cleanedMarkets} markets, ${cleanedPairs} pairs, ${cleanedEmbeddings} embeddings`);
+        }
+    }
+
+    /**
+     * Get cache statistics for logging
+     */
+    public getCacheStats(): { markets: number; pairs: number; embeddings: number } {
+        return {
+            markets: this.getSeenMarketCount(),
+            pairs: this.getAnalyzedPairCount(),
+            embeddings: this.getEmbeddingCount(),
+        };
     }
 }

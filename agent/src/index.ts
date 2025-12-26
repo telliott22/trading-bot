@@ -4,47 +4,64 @@ import { Storage } from './storage';
 import { Notifier } from './notifications';
 import { State } from './state';
 import { Monitor } from './monitor';
+import { SemanticClustering } from './clustering';
 import { SingleMarket, MarketRelation } from './types';
 
 // How often to re-scan for new opportunities (in milliseconds)
-const RESCAN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const RESCAN_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours (reduced from 6 hours - caching makes this efficient)
 const RESOLUTION_CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 async function main() {
-    console.log("Starting Polymarket Agent...");
+    console.log("Starting Polymarket Agent (with intelligent caching)...");
 
     const ingestion = new PolymarketIngestion();
     const pipeline = new Pipeline();
+    const clustering = new SemanticClustering();
     const storage = new Storage('../ui/public/predictions.csv');
     const notifier = new Notifier();
     const state = new State();
     const monitor = new Monitor(state, notifier);
 
-    console.log(`Loaded state: ${state.getOpportunityCount()} tracked opportunities (${state.getUnresolvedCount()} unresolved)`);
+    // Log state and cache statistics
+    const cacheStats = state.getCacheStats();
+    console.log(`Loaded state:`);
+    console.log(`  - Opportunities: ${state.getOpportunityCount()} tracked (${state.getUnresolvedCount()} unresolved)`);
+    console.log(`  - Cache: ${cacheStats.markets} markets, ${cacheStats.pairs} pairs, ${cacheStats.embeddings} embeddings`);
 
-    // Track known opportunities to avoid duplicate notifications (in-memory for session)
-    const knownOpportunities = new Set<string>();
-
-    async function runPipeline(markets: SingleMarket[]) {
+    async function runPipelineWithCache(allMarkets: SingleMarket[], newMarketIds: Set<string>) {
         console.log(`\n${'='.repeat(60)}`);
-        console.log(`Running pipeline on ${markets.length} markets...`);
+        console.log(`Running pipeline on ${allMarkets.length} markets (${newMarketIds.size} new)...`);
         console.log(`${'='.repeat(60)}\n`);
 
-        const clusters = await pipeline.clusterMarkets(markets);
+        // Generate embeddings with caching
+        const { embeddings, cacheHits: embCacheHits, apiCalls: embApiCalls } =
+            await clustering.generateEmbeddingsWithCache(allMarkets, state);
+
+        console.log(`Embeddings: ${embCacheHits} cached, ${embApiCalls} API calls`);
+
+        // Cluster markets using the embeddings
+        const clusters = await clustering.clusterMarketsWithEmbeddings(allMarkets, embeddings);
+
         let newOpportunitiesCount = 0;
+        let totalCacheHits = 0;
+        let totalApiCalls = 0;
 
         for (const [key, group] of clusters.entries()) {
-            console.log(`Analyzing cluster: ${key} (${group.length} markets)`);
+            console.log(`\nAnalyzing cluster: ${key} (${group.length} markets)`);
             if (group.length > 1) {
-                const relations = await pipeline.findRelationships(group);
+                // Use cached relationship finding
+                const { relationships, cacheHits, apiCalls } =
+                    await pipeline.findRelationshipsWithCache(group, state, newMarketIds);
 
-                for (const relation of relations) {
+                totalCacheHits += cacheHits;
+                totalApiCalls += apiCalls;
+
+                for (const relation of relationships) {
                     // Create unique ID for this opportunity
                     const oppId = `${relation.market1.id}-${relation.market2.id}`;
 
-                    // Only save and notify if this is a NEW opportunity
-                    if (!knownOpportunities.has(oppId)) {
-                        knownOpportunities.add(oppId);
+                    // Only save and notify if this is a NEW opportunity (check persistent state)
+                    if (!state.hasOpportunity(oppId)) {
                         await storage.savePredictions([relation]);
 
                         // Track in persistent state for resolution monitoring
@@ -54,13 +71,26 @@ async function main() {
                         await notifier.notifyNewOpportunity(relation);
                         newOpportunitiesCount++;
 
-                        console.log(`  🆕 NEW: ${relation.relationshipType} (${relation.confidenceScore}) - Notified`);
+                        console.log(`  🆕 NEW OPPORTUNITY: ${relation.relationshipType} (${relation.confidenceScore})`);
                     }
                 }
             }
         }
 
-        console.log(`\n✓ Scan complete. Found ${newOpportunitiesCount} NEW opportunities.\n`);
+        // Cleanup stale cache entries
+        state.cleanupEndedMarkets();
+
+        // Save state (includes cache)
+        state.saveState();
+
+        // Log final statistics
+        const finalCacheStats = state.getCacheStats();
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`SCAN COMPLETE`);
+        console.log(`  - New opportunities: ${newOpportunitiesCount}`);
+        console.log(`  - Pair analysis: ${totalCacheHits} cached, ${totalApiCalls} API calls`);
+        console.log(`  - Cache size: ${finalCacheStats.markets} markets, ${finalCacheStats.pairs} pairs`);
+        console.log(`${'='.repeat(60)}\n`);
 
         // Flush Langfuse traces
         await pipeline.flush();
@@ -70,16 +100,24 @@ async function main() {
 
         if (newOpportunitiesCount > 0) {
             await notifier.notifyStatus(`Scan complete: ${newOpportunitiesCount} new opportunities found`);
+        } else {
+            console.log("No new opportunities found (all cached).");
         }
     }
 
     async function scan() {
-        console.log("\nFetching active markets from Polymarket...");
-        const activeMarkets = await ingestion.fetchActiveMarkets();
-        console.log(`Fetched ${activeMarkets.length} active markets.`);
+        console.log("\n" + "=".repeat(60));
+        console.log("STARTING SCAN");
+        console.log("=".repeat(60));
 
-        if (activeMarkets.length > 0) {
-            await runPipeline(activeMarkets);
+        // Use incremental fetch to identify new markets
+        const { allMarkets, newMarkets } = await ingestion.fetchActiveMarketsIncremental(state);
+
+        console.log(`Fetched ${allMarkets.length} active markets (${newMarkets.length} new)`);
+
+        if (allMarkets.length > 0) {
+            const newMarketIds = new Set(newMarkets.map(m => m.id));
+            await runPipelineWithCache(allMarkets, newMarketIds);
         } else {
             console.log("No markets found.");
         }

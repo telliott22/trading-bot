@@ -2,8 +2,12 @@ import OpenAI from 'openai';
 import { Langfuse } from 'langfuse';
 import { SingleMarket, MarketRelation, EnrichedMarket } from './types';
 import { SemanticClustering } from './clustering';
+import { State } from './state';
 import * as dotenv from 'dotenv';
 dotenv.config();
+
+// Model to use for pair analysis - using GPT-5.2 (latest)
+const ANALYSIS_MODEL = "openai/gpt-5.2";
 
 /**
  * Pipeline for analyzing market relationships
@@ -134,6 +138,115 @@ export class Pipeline {
     }
 
     /**
+     * Find relationships with caching - only analyzes pairs where at least one market is new
+     */
+    public async findRelationshipsWithCache(
+        markets: EnrichedMarket[],
+        state: State,
+        newMarketIds: Set<string>
+    ): Promise<{ relationships: MarketRelation[]; cacheHits: number; apiCalls: number }> {
+        const relationships: MarketRelation[] = [];
+        let cacheHits = 0;
+        let apiCalls = 0;
+        let skippedTimeGap = 0;
+
+        console.log(`\nAnalyzing ${markets.length} markets for relationships...`);
+        console.log(`  New markets: ${newMarketIds.size}`);
+
+        for (let i = 0; i < markets.length; i++) {
+            for (let j = i + 1; j < markets.length; j++) {
+                const m1 = markets[i];
+                const m2 = markets[j];
+
+                // Pre-filter by time gap
+                const timeInfo = this.calculateTimeGap(m1, m2);
+                if (!timeInfo || timeInfo.days < this.MIN_TIME_GAP_DAYS) {
+                    skippedTimeGap++;
+                    continue;
+                }
+
+                // Check if this pair has already been analyzed
+                const isM1New = newMarketIds.has(m1.id);
+                const isM2New = newMarketIds.has(m2.id);
+                const isPairNew = isM1New || isM2New;
+
+                if (!isPairNew && state.isPairAnalyzed(m1.id, m2.id)) {
+                    // Both markets are old and pair was already analyzed
+                    cacheHits++;
+                    const cached = state.getPairResult(m1.id, m2.id);
+
+                    // If it was actionable, reconstruct and include it
+                    if (cached && this.isActionable(cached.result, cached.confidence)) {
+                        relationships.push(this.buildRelationFromCache(m1, m2, cached, timeInfo));
+                        console.log(`  ⚡ CACHED: ${m1.id} vs ${m2.id} → ${cached.result}`);
+                    }
+                    continue;
+                }
+
+                // Need to analyze this pair (at least one market is new)
+                apiCalls++;
+                console.log(`  🔍 Analyzing: ${m1.id} vs ${m2.id} (gap: ${timeInfo.gap})${isPairNew ? ' [NEW PAIR]' : ''}`);
+
+                const rel = await this.analyzePair(m1, m2, timeInfo);
+
+                if (rel) {
+                    // Cache the result (including UNRELATED to avoid re-analysis)
+                    state.savePairResult(m1.id, m2.id, rel.relationshipType as any, rel.confidenceScore);
+
+                    if (this.isActionable(rel.relationshipType, rel.confidenceScore)) {
+                        relationships.push(rel);
+                        console.log(`    ✓ ${rel.relationshipType} (${rel.confidenceScore}) - ACTIONABLE`);
+                    } else {
+                        const reason = rel.relationshipType === 'SAME_EVENT_REJECT'
+                            ? 'same event, no trade window'
+                            : 'not actionable';
+                        console.log(`    ✗ ${rel.relationshipType} (${reason})`);
+                    }
+                }
+            }
+        }
+
+        console.log(`\nPair analysis: ${cacheHits} cached, ${apiCalls} API calls`);
+        console.log(`Results: ${relationships.length} actionable signals\n`);
+
+        return { relationships, cacheHits, apiCalls };
+    }
+
+    /**
+     * Check if a relationship type and confidence is actionable
+     */
+    private isActionable(type: string, confidence: number): boolean {
+        return type !== 'UNRELATED' &&
+            type !== 'SAME_EVENT_REJECT' &&
+            confidence >= this.MIN_CONFIDENCE;
+    }
+
+    /**
+     * Build a MarketRelation from cached data
+     */
+    private buildRelationFromCache(
+        m1: EnrichedMarket,
+        m2: EnrichedMarket,
+        cached: { result: string; confidence: number; analyzedAt: string },
+        timeInfo: { days: number; gap: string; leaderId: string; followerId: string }
+    ): MarketRelation {
+        return {
+            market1: m1,
+            market2: m2,
+            relationshipType: cached.result as any,
+            confidenceScore: cached.confidence,
+            rationale: '[Cached result]',
+            tradingRationale: '[Cached result]',
+            expectedEdge: '',
+            leaderId: timeInfo.leaderId,
+            followerId: timeInfo.followerId,
+            timeGap: timeInfo.gap,
+            timeGapDays: timeInfo.days,
+            timestamp: cached.analyzedAt,
+        };
+    }
+
+    /**
      * Analyze a market pair with trading-focused LLM prompt
      */
     private async analyzePair(
@@ -201,7 +314,7 @@ export class Pipeline {
             // Create generation span for the LLM call
             const generation = trace?.generation({
                 name: 'market-pair-analysis',
-                model: 'openai/gpt-4-turbo',
+                model: ANALYSIS_MODEL,
                 input: {
                     system: systemPrompt,
                     user: userPrompt,
@@ -215,7 +328,7 @@ export class Pipeline {
             });
 
             const response = await this.openai.chat.completions.create({
-                model: "openai/gpt-4-turbo",  // Use GPT-4 for better analysis
+                model: ANALYSIS_MODEL,  // Using GPT-4.1 (latest)
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt }
