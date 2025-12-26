@@ -34,6 +34,7 @@ import {
   Zap,
   Crown,
   Target,
+  HelpCircle,
 } from "lucide-react";
 
 interface Prediction {
@@ -341,7 +342,14 @@ export default function Dashboard() {
           </Tabs>
 
           <div className="flex items-center gap-3">
-            <span className="text-sm text-zinc-500">Min Confidence:</span>
+            <div className="flex items-center gap-1.5 group relative">
+              <span className="text-sm text-zinc-500">Min Confidence:</span>
+              <HelpCircle className="h-4 w-4 text-zinc-600 cursor-help" />
+              <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-xs text-zinc-300 w-64 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-lg">
+                <p className="font-medium text-zinc-100 mb-1">What is confidence?</p>
+                <p>How strongly the AI believes the leader outcome will influence the follower. Higher confidence = stronger causal relationship between the two markets.</p>
+              </div>
+            </div>
             <Select value={minConfidence} onValueChange={setMinConfidence}>
               <SelectTrigger className="w-24 bg-zinc-900 border-zinc-800">
                 <SelectValue />
