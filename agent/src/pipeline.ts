@@ -85,12 +85,25 @@ export class Pipeline {
     }
 
     /**
+     * Check if two markets are from the same parent event (same slug)
+     * These are mutually exclusive outcomes that close together - not actionable
+     */
+    private isSameParentMarket(m1: EnrichedMarket, m2: EnrichedMarket): boolean {
+        // If both have slugs and they match, they're from the same event
+        if (m1.slug && m2.slug && m1.slug === m2.slug) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Find relationships within a cluster, pre-filtering by time gap
      */
     public async findRelationships(markets: EnrichedMarket[]): Promise<MarketRelation[]> {
         const relationships: MarketRelation[] = [];
         let pairCount = 0;
         let skippedTimeGap = 0;
+        let skippedSameEvent = 0;
 
         console.log(`\nAnalyzing ${markets.length} markets for relationships...`);
 
@@ -98,6 +111,12 @@ export class Pipeline {
             for (let j = i + 1; j < markets.length && pairCount < this.MAX_PAIRS_PER_CLUSTER; j++) {
                 const m1 = markets[i];
                 const m2 = markets[j];
+
+                // CRITICAL: Skip same-event pairs (same slug = mutually exclusive outcomes)
+                if (this.isSameParentMarket(m1, m2)) {
+                    skippedSameEvent++;
+                    continue;
+                }
 
                 // CRITICAL: Pre-filter by time gap (per specs)
                 const timeInfo = this.calculateTimeGap(m1, m2);
@@ -133,7 +152,8 @@ export class Pipeline {
             }
         }
 
-        console.log(`\nResults: ${relationships.length} actionable signals (skipped ${skippedTimeGap} pairs with <${this.MIN_TIME_GAP_DAYS}d gap)\n`);
+        console.log(`\nResults: ${relationships.length} actionable signals`);
+        console.log(`  Skipped: ${skippedSameEvent} same-event pairs, ${skippedTimeGap} pairs with <${this.MIN_TIME_GAP_DAYS}d gap\n`);
         return relationships;
     }
 
@@ -149,6 +169,7 @@ export class Pipeline {
         let cacheHits = 0;
         let apiCalls = 0;
         let skippedTimeGap = 0;
+        let skippedSameEvent = 0;
 
         console.log(`\nAnalyzing ${markets.length} markets for relationships...`);
         console.log(`  New markets: ${newMarketIds.size}`);
@@ -157,6 +178,12 @@ export class Pipeline {
             for (let j = i + 1; j < markets.length; j++) {
                 const m1 = markets[i];
                 const m2 = markets[j];
+
+                // CRITICAL: Skip same-event pairs (same slug = mutually exclusive outcomes)
+                if (this.isSameParentMarket(m1, m2)) {
+                    skippedSameEvent++;
+                    continue;
+                }
 
                 // Pre-filter by time gap
                 const timeInfo = this.calculateTimeGap(m1, m2);
@@ -207,6 +234,7 @@ export class Pipeline {
         }
 
         console.log(`\nPair analysis: ${cacheHits} cached, ${apiCalls} API calls`);
+        console.log(`Skipped: ${skippedSameEvent} same-event pairs, ${skippedTimeGap} pairs with <${this.MIN_TIME_GAP_DAYS}d gap`);
         console.log(`Results: ${relationships.length} actionable signals\n`);
 
         return { relationships, cacheHits, apiCalls };
