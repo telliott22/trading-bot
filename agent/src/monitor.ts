@@ -93,7 +93,11 @@ export class Monitor {
             return 0;
         }
 
-        console.log(`\nChecking ${unresolved.length} leader markets for resolution...`);
+        // Only log occasionally to reduce noise (every ~5 minutes)
+        const shouldLog = Math.random() < 0.1;
+        if (shouldLog) {
+            console.log(`Checking ${unresolved.length} leader markets for resolution...`);
+        }
 
         let resolvedCount = 0;
 
@@ -163,9 +167,8 @@ export class Monitor {
 
         if (resolvedCount > 0) {
             console.log(`\n✓ ${resolvedCount} leader market(s) resolved.`);
-        } else {
-            console.log(`  No leader resolutions detected.`);
         }
+        // Don't log "no resolutions" - too noisy with 60s polling
 
         return resolvedCount;
     }

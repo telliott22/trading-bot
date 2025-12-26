@@ -10,7 +10,7 @@ import { SingleMarket, MarketRelation } from './types';
 
 // How often to re-scan for new opportunities (in milliseconds)
 const RESCAN_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours (reduced from 6 hours - caching makes this efficient)
-const RESOLUTION_CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+const RESOLUTION_CHECK_INTERVAL_MS = 60 * 1000; // 60 seconds - fast polling for quick execution
 
 async function main() {
     console.log("Starting Polymarket Agent (with intelligent caching)...");
@@ -144,7 +144,7 @@ async function main() {
     } else {
         console.log(`\nRunning in continuous mode.`);
         console.log(`  - Opportunity scan: every ${RESCAN_INTERVAL_MS / 1000 / 60 / 60} hours`);
-        console.log(`  - Resolution check: every ${RESOLUTION_CHECK_INTERVAL_MS / 1000 / 60} minutes`);
+        console.log(`  - Resolution check: every ${RESOLUTION_CHECK_INTERVAL_MS / 1000} seconds`);
 
         // Schedule periodic opportunity scans
         setInterval(scan, RESCAN_INTERVAL_MS);
