@@ -64,7 +64,7 @@ export default function Dashboard() {
   const [filter, setFilter] = useState<
     "SAME_OUTCOME" | "DIFFERENT_OUTCOME" | "ALL"
   >("SAME_OUTCOME");
-  const [minConfidence, setMinConfidence] = useState<string>("0.7");
+  const [minConfidence, setMinConfidence] = useState<string>("0.5");
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
