@@ -144,6 +144,44 @@ Confidence: ${(relation.confidenceScore * 100).toFixed(0)}%
     }
 
     /**
+     * Notify when a trade has been automatically executed
+     */
+    async notifyTradeExecuted(
+        relation: MarketRelation,
+        leaderOutcome: 'YES' | 'NO',
+        size: number,
+        price: number
+    ): Promise<void> {
+        const leader = relation.leaderId === relation.market1.id ? relation.market1 : relation.market2;
+        const follower = relation.leaderId === relation.market1.id ? relation.market2 : relation.market1;
+
+        // Determine what was bought
+        let betAction: string;
+        if (relation.relationshipType === 'SAME_OUTCOME') {
+            betAction = leaderOutcome === 'YES' ? 'YES' : 'NO';
+        } else {
+            betAction = leaderOutcome === 'YES' ? 'NO' : 'YES';
+        }
+
+        const message = `✅ TRADE EXECUTED!
+
+Leader resolved: ${leader.question}
+Result: ${leaderOutcome}
+
+Executed: BUY ${betAction} on follower
+${follower.question}
+
+Position: $${size.toFixed(2)} at ${(price * 100).toFixed(1)}¢
+Expected payout: $${(size / price).toFixed(2)} if correct
+
+Confidence: ${(relation.confidenceScore * 100).toFixed(0)}%
+
+📊 Dashboard: https://trading-bot-hazel.vercel.app/`;
+
+        await this.send(message);
+    }
+
+    /**
      * Simple status message
      */
     async notifyStatus(message: string): Promise<void> {

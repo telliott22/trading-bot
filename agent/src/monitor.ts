@@ -1,11 +1,12 @@
 /**
  * Leader Resolution Monitor
  * Polls Polymarket API to detect when leader markets resolve
- * and triggers notifications for trading action
+ * and triggers notifications + automated execution
  */
 
 import { State, TrackedOpportunity } from './state';
 import { Notifier } from './notifications';
+import { Executor } from './executor';
 
 interface PolymarketMarketResponse {
     id: string;
@@ -19,10 +20,32 @@ interface PolymarketMarketResponse {
 export class Monitor {
     private state: State;
     private notifier: Notifier;
+    private executor: Executor | null = null;
+    private autoExecute: boolean = false;
 
-    constructor(state: State, notifier: Notifier) {
+    constructor(state: State, notifier: Notifier, executor?: Executor) {
         this.state = state;
         this.notifier = notifier;
+
+        if (executor) {
+            this.executor = executor;
+            this.autoExecute = executor.isEnabled();
+            if (this.autoExecute) {
+                console.log('✓ Auto-execution ENABLED - trades will execute automatically');
+            }
+        }
+    }
+
+    /**
+     * Enable or disable auto-execution
+     */
+    public setAutoExecute(enabled: boolean): void {
+        if (enabled && (!this.executor || !this.executor.isEnabled())) {
+            console.warn('Cannot enable auto-execute: Executor not initialized');
+            return;
+        }
+        this.autoExecute = enabled;
+        console.log(`Auto-execution ${enabled ? 'ENABLED' : 'DISABLED'}`);
     }
 
     /**
@@ -91,10 +114,40 @@ export class Monitor {
                 const outcome = this.parseOutcome(market);
 
                 if (outcome) {
-                    console.log(`  🎯 LEADER RESOLVED: ${market.question} → ${outcome}`);
+                    console.log(`\n  🎯 LEADER RESOLVED: ${market.question}`);
+                    console.log(`     Outcome: ${outcome}`);
 
-                    // Send notification
-                    await this.notifier.notifyLeaderResolved(opp.relation, outcome);
+                    // Determine action based on relationship
+                    const action = this.getTradeAction(opp.relation.relationshipType, outcome);
+                    console.log(`     Signal: ${action} on follower`);
+
+                    // AUTO-EXECUTE if enabled
+                    if (this.autoExecute && this.executor) {
+                        console.log(`\n  🤖 AUTO-EXECUTING TRADE...`);
+
+                        const result = await this.executor.executeFollowerTrade(opp.relation, outcome);
+
+                        if (result.success) {
+                            console.log(`  ✓ Trade executed: $${result.size} at ${(result.price! * 100).toFixed(1)}¢`);
+
+                            // Send success notification
+                            await this.notifier.notifyTradeExecuted(
+                                opp.relation,
+                                outcome,
+                                result.size!,
+                                result.price!
+                            );
+                        } else {
+                            console.log(`  ✗ Trade failed: ${result.error}`);
+
+                            // Send failure notification but still notify about the signal
+                            await this.notifier.notifyLeaderResolved(opp.relation, outcome);
+                            await this.notifier.notifyStatus(`⚠️ Auto-trade failed: ${result.error}`);
+                        }
+                    } else {
+                        // Just send notification for manual trading
+                        await this.notifier.notifyLeaderResolved(opp.relation, outcome);
+                    }
 
                     // Update state
                     this.state.markLeaderResolved(opp.id, outcome);
@@ -109,11 +162,23 @@ export class Monitor {
         }
 
         if (resolvedCount > 0) {
-            console.log(`\n✓ ${resolvedCount} leader market(s) resolved, notifications sent.`);
+            console.log(`\n✓ ${resolvedCount} leader market(s) resolved.`);
         } else {
             console.log(`  No leader resolutions detected.`);
         }
 
         return resolvedCount;
+    }
+
+    /**
+     * Get human-readable trade action
+     */
+    private getTradeAction(relationshipType: string, leaderOutcome: 'YES' | 'NO'): string {
+        if (relationshipType === 'SAME_OUTCOME') {
+            return `BUY ${leaderOutcome}`;
+        } else if (relationshipType === 'DIFFERENT_OUTCOME') {
+            return leaderOutcome === 'YES' ? 'BUY NO' : 'BUY YES';
+        }
+        return 'NO ACTION';
     }
 }

@@ -4,6 +4,7 @@ import { Storage } from './storage';
 import { Notifier } from './notifications';
 import { State } from './state';
 import { Monitor } from './monitor';
+import { Executor } from './executor';
 import { SemanticClustering } from './clustering';
 import { SingleMarket, MarketRelation } from './types';
 
@@ -20,7 +21,12 @@ async function main() {
     const storage = new Storage('../ui/public/predictions.csv');
     const notifier = new Notifier();
     const state = new State();
-    const monitor = new Monitor(state, notifier);
+    const executor = new Executor();
+
+    // Wait for executor to initialize (async wallet setup)
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    const monitor = new Monitor(state, notifier, executor);
 
     // Log state and cache statistics
     const cacheStats = state.getCacheStats();
