@@ -5,67 +5,129 @@ import * as fs from 'fs';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPO = 'telliott22/trading-bot';
 const GITHUB_CSV_PATH = 'dashboard/public/predictions.csv';
+const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${GITHUB_REPO}/main/${GITHUB_CSV_PATH}`;
+
+const CSV_HEADER = [
+    { id: 'timestamp', title: 'timestamp' },
+    { id: 'market1Id', title: 'market1Id' },
+    { id: 'market2Id', title: 'market2Id' },
+    { id: 'market1Slug', title: 'market1Slug' },
+    { id: 'market2Slug', title: 'market2Slug' },
+    { id: 'market1Question', title: 'market1Question' },
+    { id: 'market2Question', title: 'market2Question' },
+    { id: 'market1YesPrice', title: 'market1YesPrice' },
+    { id: 'market2YesPrice', title: 'market2YesPrice' },
+    { id: 'relationshipType', title: 'relationshipType' },
+    { id: 'confidenceScore', title: 'confidenceScore' },
+    { id: 'tradingRationale', title: 'tradingRationale' },
+    { id: 'expectedEdge', title: 'expectedEdge' },
+    { id: 'leaderId', title: 'leaderId' },
+    { id: 'followerId', title: 'followerId' },
+    { id: 'leaderEndDate', title: 'leaderEndDate' },
+    { id: 'timeGap', title: 'timeGap' },
+    { id: 'timeGapDays', title: 'timeGapDays' }
+];
 
 export class Storage {
-    private csvWriter: any;
     private filePath: string;
     private allRecords: any[] = [];
+    private initialized: boolean = false;
 
     constructor(filePath: string) {
         this.filePath = filePath;
-        const fileExists = fs.existsSync(filePath);
+    }
 
-        // Load existing records if file exists
-        if (fileExists) {
-            try {
-                const content = fs.readFileSync(filePath, 'utf-8');
-                const lines = content.trim().split('\n');
-                if (lines.length > 1) {
-                    // Skip header, parse existing records
-                    const header = lines[0].split(',');
-                    for (let i = 1; i < lines.length; i++) {
-                        // Simple CSV parse (assumes no commas in values for now)
-                        const values = lines[i].split(',');
-                        const record: any = {};
-                        header.forEach((key, idx) => {
-                            record[key] = values[idx] || '';
-                        });
-                        this.allRecords.push(record);
-                    }
-                }
-            } catch (e) {
-                console.log('Could not load existing CSV, starting fresh');
+    /**
+     * Initialize storage by fetching existing data from GitHub
+     * This ensures we never lose historical data even on fresh deployments
+     */
+    public async initialize(): Promise<void> {
+        if (this.initialized) return;
+
+        try {
+            console.log('Fetching existing predictions from GitHub...');
+            const response = await fetch(GITHUB_RAW_URL);
+
+            if (response.ok) {
+                const csvText = await response.text();
+                this.allRecords = this.parseCSV(csvText);
+                console.log(`✓ Loaded ${this.allRecords.length} existing predictions from GitHub`);
+            } else if (response.status === 404) {
+                console.log('No existing predictions on GitHub, starting fresh');
+                this.allRecords = [];
+            } else {
+                console.warn(`Failed to fetch from GitHub (${response.status}), starting fresh`);
+                this.allRecords = [];
+            }
+        } catch (error) {
+            console.error('Error fetching from GitHub:', error);
+            this.allRecords = [];
+        }
+
+        this.initialized = true;
+    }
+
+    /**
+     * Parse CSV text handling quoted fields with commas
+     */
+    private parseCSV(csvText: string): any[] {
+        const lines = csvText.trim().split('\n');
+        if (lines.length <= 1) return [];
+
+        const headers = lines[0].split(',');
+        const records: any[] = [];
+
+        for (let i = 1; i < lines.length; i++) {
+            const values = this.parseCSVLine(lines[i]);
+            if (values.length >= headers.length) {
+                const record: any = {};
+                headers.forEach((key, idx) => {
+                    record[key] = values[idx] || '';
+                });
+                records.push(record);
             }
         }
 
-        this.csvWriter = createObjectCsvWriter({
-            path: this.filePath,
-            header: [
-                { id: 'timestamp', title: 'timestamp' },
-                { id: 'market1Id', title: 'market1Id' },
-                { id: 'market2Id', title: 'market2Id' },
-                { id: 'market1Slug', title: 'market1Slug' },
-                { id: 'market2Slug', title: 'market2Slug' },
-                { id: 'market1Question', title: 'market1Question' },
-                { id: 'market2Question', title: 'market2Question' },
-                { id: 'market1YesPrice', title: 'market1YesPrice' },
-                { id: 'market2YesPrice', title: 'market2YesPrice' },
-                { id: 'relationshipType', title: 'relationshipType' },
-                { id: 'confidenceScore', title: 'confidenceScore' },
-                { id: 'tradingRationale', title: 'tradingRationale' },
-                { id: 'expectedEdge', title: 'expectedEdge' },
-                { id: 'leaderId', title: 'leaderId' },
-                { id: 'followerId', title: 'followerId' },
-                { id: 'leaderEndDate', title: 'leaderEndDate' },
-                { id: 'timeGap', title: 'timeGap' },
-                { id: 'timeGapDays', title: 'timeGapDays' }
-            ],
-            append: fileExists
-        });
+        return records;
+    }
+
+    /**
+     * Parse a single CSV line, handling quoted fields with commas
+     */
+    private parseCSVLine(line: string): string[] {
+        const values: string[] = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+
+            if (char === '"') {
+                if (inQuotes && line[i + 1] === '"') {
+                    // Escaped quote
+                    current += '"';
+                    i++;
+                } else {
+                    // Toggle quote mode
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === ',' && !inQuotes) {
+                values.push(current);
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        values.push(current);
+
+        return values;
     }
 
     public async savePredictions(predictions: MarketRelation[]) {
         if (predictions.length === 0) return;
+
+        // Ensure initialized
+        await this.initialize();
 
         const records = predictions.map(p => {
             // Find leader market to get end date
@@ -96,8 +158,16 @@ export class Storage {
         // Add to in-memory records
         this.allRecords.push(...records);
 
-        await this.csvWriter.writeRecords(records);
-        console.log(`✓ Saved ${predictions.length} actionable signals to CSV.`);
+        // Write ALL records (existing + new) to local file
+        // This ensures we always have the complete dataset
+        const csvWriter = createObjectCsvWriter({
+            path: this.filePath,
+            header: CSV_HEADER,
+            append: false // Always overwrite with full dataset
+        });
+
+        await csvWriter.writeRecords(this.allRecords);
+        console.log(`✓ Saved ${predictions.length} new signals (${this.allRecords.length} total) to CSV.`);
     }
 
     /**
