@@ -52,6 +52,75 @@ export class Pipeline {
         }
     }
 
+    // ============================================
+    // Series Detection for Date-Based Markets
+    // ============================================
+
+    /**
+     * Date patterns for series detection
+     */
+    private readonly DATE_PATTERNS = [
+        /by (january|february|march|april|may|june|july|august|september|october|november|december)/i,
+        /by (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
+        /by Q[1-4]/i,
+        /by end of \d{4}/i,
+        /before (january|february|march|april|may|june|july|august|september|october|november|december)/i,
+        /in (january|february|march|april|may|june|july|august|september|october|november|december)/i,
+    ];
+
+    /**
+     * Extract base question by removing date/time parts
+     */
+    private getBaseQuestion(question: string): string {
+        let base = question;
+        for (const pattern of this.DATE_PATTERNS) {
+            base = base.replace(pattern, '').trim();
+        }
+        // Also remove years
+        base = base.replace(/\b20\d{2}\b/g, '').trim();
+        // Normalize punctuation and whitespace
+        return base.toLowerCase().replace(/[?!.,]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    /**
+     * Calculate Jaccard similarity between two strings
+     */
+    private wordSimilarity(a: string, b: string): number {
+        const wordsA = new Set(a.split(/\s+/));
+        const wordsB = new Set(b.split(/\s+/));
+        const intersection = [...wordsA].filter(w => wordsB.has(w)).length;
+        const union = new Set([...wordsA, ...wordsB]).size;
+        return union > 0 ? intersection / union : 0;
+    }
+
+    /**
+     * Simple hash function for series ID
+     */
+    private hashString(str: string): string {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) - hash) + str.charCodeAt(i);
+            hash |= 0;
+        }
+        return 'series-' + Math.abs(hash).toString(36);
+    }
+
+    /**
+     * Detect if two markets are part of the same date series
+     * Returns a series ID if they are, null otherwise
+     */
+    private detectSeriesId(m1: EnrichedMarket, m2: EnrichedMarket): string | null {
+        const base1 = this.getBaseQuestion(m1.question);
+        const base2 = this.getBaseQuestion(m2.question);
+
+        // If base questions are very similar (>80%), they're in the same series
+        if (this.wordSimilarity(base1, base2) > 0.8) {
+            return this.hashString(base1);
+        }
+
+        return null;
+    }
+
     /**
      * Cluster markets using semantic clustering
      */
@@ -271,6 +340,7 @@ export class Pipeline {
             timeGap: timeInfo.gap,
             timeGapDays: timeInfo.days,
             timestamp: cached.analyzedAt,
+            seriesId: this.detectSeriesId(m1, m2) || undefined,
         };
     }
 
@@ -408,7 +478,8 @@ export class Pipeline {
                 followerId: timeInfo.followerId,
                 timeGap: timeInfo.gap,
                 timeGapDays: timeInfo.days,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                seriesId: this.detectSeriesId(m1, m2) || undefined,
             };
 
         } catch (error) {

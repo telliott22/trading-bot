@@ -25,7 +25,12 @@ const CSV_HEADER = [
     { id: 'followerId', title: 'followerId' },
     { id: 'leaderEndDate', title: 'leaderEndDate' },
     { id: 'timeGap', title: 'timeGap' },
-    { id: 'timeGapDays', title: 'timeGapDays' }
+    { id: 'timeGapDays', title: 'timeGapDays' },
+    // Status tracking for near-certainty threshold feature
+    { id: 'status', title: 'status' },
+    { id: 'thresholdTriggeredAt', title: 'thresholdTriggeredAt' },
+    { id: 'thresholdPrice', title: 'thresholdPrice' },
+    { id: 'seriesId', title: 'seriesId' },
 ];
 
 export class Storage {
@@ -151,7 +156,12 @@ export class Storage {
                 followerId: p.followerId,
                 leaderEndDate: leader.endTime || '',
                 timeGap: p.timeGap,
-                timeGapDays: p.timeGapDays?.toFixed(1) || ''
+                timeGapDays: p.timeGapDays?.toFixed(1) || '',
+                // Status tracking for near-certainty threshold feature
+                status: 'active',
+                thresholdTriggeredAt: '',
+                thresholdPrice: '',
+                seriesId: p.seriesId || '',
             };
         });
 
@@ -231,5 +241,46 @@ export class Storage {
         } catch (error) {
             console.error('Error pushing to GitHub:', error);
         }
+    }
+
+    /**
+     * Update the status of an existing opportunity in the CSV
+     * Used when a leader hits 90%+ threshold or officially resolves
+     */
+    public async updateOpportunityStatus(
+        oppId: string,
+        status: 'active' | 'threshold_triggered' | 'resolved',
+        thresholdPrice?: number
+    ): Promise<boolean> {
+        await this.initialize();
+
+        // Find the record by matching market1Id-market2Id
+        const record = this.allRecords.find(r =>
+            `${r.market1Id}-${r.market2Id}` === oppId
+        );
+
+        if (!record) {
+            console.warn(`No CSV record found for opportunity ${oppId}`);
+            return false;
+        }
+
+        // Update the record
+        record.status = status;
+        if (thresholdPrice !== undefined) {
+            record.thresholdTriggeredAt = new Date().toISOString();
+            record.thresholdPrice = thresholdPrice.toFixed(2);
+        }
+
+        // Rewrite the entire CSV with updated records
+        const csvWriter = createObjectCsvWriter({
+            path: this.filePath,
+            header: CSV_HEADER,
+            append: false
+        });
+
+        await csvWriter.writeRecords(this.allRecords);
+        console.log(`✓ Updated status of ${oppId} to ${status}`);
+
+        return true;
     }
 }

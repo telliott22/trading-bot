@@ -34,6 +34,7 @@ export interface MarketRelation {
     timeGap?: string; // e.g. "12 days" or "4 hours"
     timeGapDays?: number; // Numeric for filtering/sorting
     timestamp: string;
+    seriesId?: string; // For grouping date-series markets (e.g., "Maduro out by Jan/Feb/Mar")
 }
 
 // Internal type for clustering/processing

@@ -187,4 +187,65 @@ Confidence: ${(relation.confidenceScore * 100).toFixed(0)}%
     async notifyStatus(message: string): Promise<void> {
         await this.send(`ℹ️ ${message}`);
     }
+
+    /**
+     * Notify when a leader market hits near-certainty threshold (90%+)
+     * This is for EARLY ACTION before official resolution
+     */
+    async notifyThresholdHit(relation: MarketRelation, price: number): Promise<void> {
+        const leader = relation.leaderId === relation.market1.id ? relation.market1 : relation.market2;
+        const follower = relation.leaderId === relation.market1.id ? relation.market2 : relation.market1;
+
+        // Determine what to bet based on relationship
+        let betAction: string;
+        if (relation.relationshipType === 'SAME_OUTCOME') {
+            betAction = 'BUY YES';
+        } else {
+            betAction = 'BUY NO';
+        }
+
+        const message = `⚡ NEAR CERTAINTY - ${(price * 100).toFixed(0)}%!
+
+Leader: ${leader.question}
+Current YES: ${(price * 100).toFixed(1)}%
+
+📈 SUGGESTED ACTION: ${betAction} on follower:
+${follower.question}
+
+Confidence: ${(relation.confidenceScore * 100).toFixed(0)}%
+Time gap: ${relation.timeGap}
+
+👉 TRADE: https://polymarket.com/event/${follower.slug}
+
+⚠️ Manual review required - not auto-executed`;
+
+        await this.send(message);
+    }
+
+    /**
+     * Notify about a cascade alert (when a date-series leader triggers)
+     */
+    async notifyCascadeThreshold(
+        targetRelation: MarketRelation,
+        sourceLeaderQuestion: string,
+        sourcePrice: number
+    ): Promise<void> {
+        const targetFollower = targetRelation.followerId === targetRelation.market1.id
+            ? targetRelation.market1
+            : targetRelation.market2;
+
+        const message = `📢 CASCADE ALERT
+
+${sourceLeaderQuestion} hit ${(sourcePrice * 100).toFixed(0)}%
+
+This also affects later market:
+${targetFollower.question}
+Current YES: ${targetFollower.yesPrice ? (targetFollower.yesPrice * 100).toFixed(1) : '?'}%
+
+Consider trading this too if thesis holds.
+
+👉 https://polymarket.com/event/${targetFollower.slug}`;
+
+        await this.send(message);
+    }
 }

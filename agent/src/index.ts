@@ -135,6 +135,9 @@ async function main() {
     // Check for any leader resolutions on startup
     await monitor.checkLeaderResolutions();
 
+    // Check for any near-certainty thresholds (90%+) on startup
+    await monitor.checkPriceThresholds();
+
     // Check if running as one-shot (cron) or continuous
     const isCronMode = process.env.CRON_MODE === 'true';
 
@@ -144,14 +147,15 @@ async function main() {
     } else {
         console.log(`\nRunning in continuous mode.`);
         console.log(`  - Opportunity scan: every ${RESCAN_INTERVAL_MS / 1000 / 60 / 60} hours`);
-        console.log(`  - Resolution check: every ${RESOLUTION_CHECK_INTERVAL_MS / 1000} seconds`);
+        console.log(`  - Resolution + threshold check: every ${RESOLUTION_CHECK_INTERVAL_MS / 1000} seconds`);
 
         // Schedule periodic opportunity scans
         setInterval(scan, RESCAN_INTERVAL_MS);
 
-        // Schedule more frequent resolution checks
+        // Schedule more frequent resolution and threshold checks
         setInterval(async () => {
             await monitor.checkLeaderResolutions();
+            await monitor.checkPriceThresholds();
         }, RESOLUTION_CHECK_INTERVAL_MS);
 
         // Keep process alive

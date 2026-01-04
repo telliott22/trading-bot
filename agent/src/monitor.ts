@@ -15,7 +15,14 @@ interface PolymarketMarketResponse {
     resolved: boolean;
     outcome?: string;  // "Yes" or "No" when resolved
     winning_outcome?: string;
+    tokens?: Array<{
+        outcome: string;
+        price: string;
+    }>;
 }
+
+// Near-certainty threshold: alert when leader hits 90%+
+const NEAR_CERTAINTY_THRESHOLD = 0.90;
 
 export class Monitor {
     private state: State;
@@ -183,5 +190,131 @@ export class Monitor {
             return leaderOutcome === 'YES' ? 'BUY NO' : 'BUY YES';
         }
         return 'NO ACTION';
+    }
+
+    // ============================================
+    // Near-Certainty Threshold Monitoring
+    // ============================================
+
+    /**
+     * Extract YES token price from market response
+     */
+    private getYesPrice(market: PolymarketMarketResponse): number | null {
+        if (!market.tokens || market.tokens.length === 0) return null;
+        const yesToken = market.tokens.find(t =>
+            t.outcome?.toLowerCase() === 'yes'
+        );
+        return yesToken ? parseFloat(yesToken.price) : null;
+    }
+
+    /**
+     * Check all active opportunities for near-certainty threshold (90%+)
+     * Returns count of newly triggered opportunities
+     */
+    public async checkPriceThresholds(): Promise<number> {
+        const active = this.state.getActiveOpportunities();
+
+        if (active.length === 0) {
+            return 0;
+        }
+
+        // Only log occasionally to reduce noise
+        const shouldLog = Math.random() < 0.1;
+        if (shouldLog) {
+            console.log(`Checking ${active.length} opportunities for 90%+ threshold...`);
+        }
+
+        let triggeredCount = 0;
+
+        for (const opp of active) {
+            const leaderId = opp.relation.leaderId;
+            if (!leaderId) continue;
+
+            const market = await this.fetchMarketStatus(leaderId);
+            if (!market) continue;
+
+            // Skip if already resolved (will be handled by checkLeaderResolutions)
+            if (market.resolved || market.closed) continue;
+
+            const yesPrice = this.getYesPrice(market);
+            if (yesPrice === null) continue;
+
+            // Check if price exceeds threshold
+            if (yesPrice >= NEAR_CERTAINTY_THRESHOLD) {
+                console.log(`\n  ⚡ THRESHOLD HIT: ${market.question}`);
+                console.log(`     YES price: ${(yesPrice * 100).toFixed(1)}%`);
+
+                // Mark as triggered in state
+                this.state.markThresholdTriggered(opp.id, yesPrice);
+
+                // Send alert notification
+                await this.notifier.notifyThresholdHit(opp.relation, yesPrice);
+
+                // Check for cascade alerts (other markets in same series)
+                await this.cascadeThresholdAlert(opp, yesPrice);
+
+                triggeredCount++;
+            }
+
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+        if (triggeredCount > 0) {
+            console.log(`\n✓ ${triggeredCount} opportunity(ies) hit 90%+ threshold.`);
+        }
+
+        return triggeredCount;
+    }
+
+    /**
+     * Send cascade alerts for all opportunities in the same date series
+     */
+    private async cascadeThresholdAlert(
+        triggeredOpp: TrackedOpportunity,
+        triggerPrice: number
+    ): Promise<void> {
+        const seriesId = triggeredOpp.seriesId;
+        if (!seriesId) return;
+
+        // Get all opportunities in the same series
+        const seriesOpps = this.state.getOpportunitiesInSeries(seriesId);
+
+        // Get the leader's end date for comparison
+        const triggeredLeader = triggeredOpp.relation.leaderId === triggeredOpp.relation.market1.id
+            ? triggeredOpp.relation.market1
+            : triggeredOpp.relation.market2;
+        const triggeredLeaderEnd = new Date(triggeredLeader.endTime).getTime();
+
+        // Find opportunities with later end dates that haven't been triggered
+        const cascadeTargets = seriesOpps.filter(opp => {
+            if (opp.id === triggeredOpp.id) return false;  // Skip self
+            if (opp.thresholdTriggered) return false;  // Already triggered
+
+            // Get this opportunity's leader end date
+            const leader = opp.relation.leaderId === opp.relation.market1.id
+                ? opp.relation.market1
+                : opp.relation.market2;
+            const leaderEnd = new Date(leader.endTime).getTime();
+
+            // Only cascade to later-dated markets
+            return leaderEnd > triggeredLeaderEnd;
+        });
+
+        if (cascadeTargets.length === 0) return;
+
+        console.log(`  📢 Sending ${cascadeTargets.length} cascade alert(s)...`);
+
+        for (const target of cascadeTargets) {
+            // Mark as triggered (cascade)
+            this.state.markThresholdTriggered(target.id, triggerPrice);
+
+            // Send cascade notification
+            await this.notifier.notifyCascadeThreshold(
+                target.relation,
+                triggeredLeader.question,
+                triggerPrice
+            );
+        }
     }
 }

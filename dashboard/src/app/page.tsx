@@ -35,6 +35,7 @@ import {
   Crown,
   Target,
   HelpCircle,
+  CheckCircle,
 } from "lucide-react";
 
 interface Prediction {
@@ -56,6 +57,11 @@ interface Prediction {
   leaderEndDate?: string;
   timeGap?: string;
   timeGapDays?: string;
+  // Status tracking for near-certainty threshold
+  status?: 'active' | 'threshold_triggered' | 'resolved';
+  thresholdTriggeredAt?: string;
+  thresholdPrice?: string;
+  seriesId?: string;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -65,6 +71,9 @@ export default function Dashboard() {
   const [filter, setFilter] = useState<
     "SAME_OUTCOME" | "DIFFERENT_OUTCOME" | "ALL"
   >("SAME_OUTCOME");
+  const [statusFilter, setStatusFilter] = useState<
+    "active" | "triggered" | "resolved" | "all"
+  >("active");
   const [minConfidence, setMinConfidence] = useState<string>("0.5");
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -97,6 +106,16 @@ export default function Dashboard() {
   const filteredData = useMemo(() => {
     let result = data.slice().reverse();
 
+    // Status filter (active, triggered, resolved, or all)
+    if (statusFilter === 'active') {
+      result = result.filter((row) => !row.status || row.status === 'active');
+    } else if (statusFilter === 'triggered') {
+      result = result.filter((row) => row.status === 'threshold_triggered');
+    } else if (statusFilter === 'resolved') {
+      result = result.filter((row) => row.status === 'resolved');
+    }
+    // 'all' shows everything
+
     // Filter out UNRELATED by default (unless viewing ALL)
     if (filter !== "ALL") {
       result = result.filter((row) => row.relationshipType === filter);
@@ -122,7 +141,7 @@ export default function Dashboard() {
     });
 
     return result;
-  }, [data, filter, minConfidence]);
+  }, [data, filter, statusFilter, minConfidence]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = filteredData.slice(
@@ -132,7 +151,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [filter, minConfidence]);
+  }, [filter, statusFilter, minConfidence]);
 
   const stats = useMemo(
     () => ({
@@ -144,6 +163,9 @@ export default function Dashboard() {
       withLeader: data.filter(
         (d) => d.leaderId && d.timeGap && d.timeGap !== "0d 0h"
       ).length,
+      triggered: data.filter((d) => d.status === "threshold_triggered").length,
+      resolved: data.filter((d) => d.status === "resolved").length,
+      active: data.filter((d) => !d.status || d.status === "active").length,
     }),
     [data]
   );
@@ -166,6 +188,27 @@ export default function Dashboard() {
   const formatLastUpdated = (date: Date | null) => {
     if (!date) return "Loading...";
     return date.toLocaleString();
+  };
+
+  // Get status badge for a row
+  const getStatusBadge = (status?: string, thresholdPrice?: string) => {
+    if (status === "resolved") {
+      return (
+        <Badge className="bg-zinc-600/20 text-zinc-400 border-zinc-500/30">
+          <CheckCircle className="w-3 h-3 mr-1" />
+          Resolved
+        </Badge>
+      );
+    }
+    if (status === "threshold_triggered") {
+      return (
+        <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
+          <Zap className="w-3 h-3 mr-1" />
+          {thresholdPrice ? `${(parseFloat(thresholdPrice) * 100).toFixed(0)}%` : "90%+"}
+        </Badge>
+      );
+    }
+    return null; // No badge for active status
   };
 
   // Build proper Polymarket URL
@@ -299,7 +342,64 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Filters */}
+        {/* Status Filters */}
+        <div className="flex items-center gap-4 mb-4">
+          <span className="text-sm text-zinc-500">Status:</span>
+          <Tabs
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+          >
+            <TabsList className="bg-zinc-900 border border-zinc-800 p-1">
+              <TabsTrigger
+                value="active"
+                className="data-[state=active]:bg-emerald-600 data-[state=active]:text-white px-3"
+              >
+                <Activity className="h-4 w-4 mr-1" />
+                Active
+                <Badge
+                  variant="secondary"
+                  className="ml-1 bg-zinc-800 text-zinc-400 text-xs"
+                >
+                  {stats.active}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger
+                value="triggered"
+                className="data-[state=active]:bg-amber-600 data-[state=active]:text-white px-3"
+              >
+                <Zap className="h-4 w-4 mr-1" />
+                Triggered
+                <Badge
+                  variant="secondary"
+                  className="ml-1 bg-zinc-800 text-zinc-400 text-xs"
+                >
+                  {stats.triggered}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger
+                value="resolved"
+                className="data-[state=active]:bg-zinc-600 data-[state=active]:text-white px-3"
+              >
+                <CheckCircle className="h-4 w-4 mr-1" />
+                Resolved
+                <Badge
+                  variant="secondary"
+                  className="ml-1 bg-zinc-800 text-zinc-400 text-xs"
+                >
+                  {stats.resolved}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger
+                value="all"
+                className="data-[state=active]:bg-zinc-700 px-3"
+              >
+                All
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
+        {/* Type Filters */}
         <div className="flex items-center justify-between mb-6">
           <Tabs
             value={filter}
@@ -425,20 +525,27 @@ export default function Dashboard() {
                     const market1IsLeader = row.leaderId === row.market1Id;
                     const market2IsLeader = row.leaderId === row.market2Id;
 
+                    const isResolved = row.status === 'resolved';
+                    const isTriggered = row.status === 'threshold_triggered';
+
                     return (
                       <>
                         <TableRow
                           key={index}
-                          className={`border-zinc-800 cursor-pointer transition-all ${isExpanded
-                            ? "bg-zinc-800/50"
-                            : "hover:bg-zinc-800/30"
-                            }`}
+                          className={`border-zinc-800 cursor-pointer transition-all ${
+                            isExpanded
+                              ? "bg-zinc-800/50"
+                              : "hover:bg-zinc-800/30"
+                          } ${isResolved ? "opacity-50" : ""}`}
                           onClick={() =>
                             setExpandedRow(isExpanded ? null : index)
                           }
                         >
                           <TableCell className="text-zinc-500 font-mono text-xs">
-                            {formatTimeAgo(row.timestamp)}
+                            <div className="flex flex-col gap-1">
+                              {formatTimeAgo(row.timestamp)}
+                              {getStatusBadge(row.status, row.thresholdPrice)}
+                            </div>
                           </TableCell>
                           <TableCell className="max-w-[400px]">
                             <div className="space-y-2">

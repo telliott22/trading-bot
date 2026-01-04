@@ -41,6 +41,12 @@ export interface TrackedOpportunity {
     leaderOutcome?: 'YES' | 'NO';
     notifiedAt?: string;
     createdAt: string;
+    // Threshold tracking for near-certainty alerts
+    thresholdTriggered?: boolean;
+    thresholdTriggeredAt?: string;
+    thresholdPrice?: number;
+    status: 'active' | 'threshold_triggered' | 'resolved';
+    seriesId?: string;  // For grouping date-series markets (e.g., "Maduro out by Jan/Feb/Mar")
 }
 
 export interface OpportunityState {
@@ -108,6 +114,8 @@ export class State {
             relation,
             leaderResolved: false,
             createdAt: new Date().toISOString(),
+            status: 'active',
+            seriesId: relation.seriesId,
         });
 
         this.saveState();
@@ -120,6 +128,7 @@ export class State {
             opp.leaderResolved = true;
             opp.leaderOutcome = outcome;
             opp.notifiedAt = new Date().toISOString();
+            opp.status = 'resolved';
             this.saveState();
         }
     }
@@ -134,6 +143,48 @@ export class State {
 
     public getOpportunityCount(): number {
         return this.state.opportunities.length;
+    }
+
+    // ============================================
+    // Threshold Tracking Methods
+    // ============================================
+
+    /**
+     * Get opportunities that are active and haven't been threshold-triggered
+     */
+    public getActiveOpportunities(): TrackedOpportunity[] {
+        return this.state.opportunities.filter(opp =>
+            opp.status === 'active' && !opp.leaderResolved && !opp.thresholdTriggered
+        );
+    }
+
+    /**
+     * Mark an opportunity as threshold-triggered (leader hit 90%+)
+     */
+    public markThresholdTriggered(id: string, price: number): void {
+        const opp = this.state.opportunities.find(o => o.id === id);
+        if (opp) {
+            opp.thresholdTriggered = true;
+            opp.thresholdTriggeredAt = new Date().toISOString();
+            opp.thresholdPrice = price;
+            opp.status = 'threshold_triggered';
+            this.saveState();
+        }
+    }
+
+    /**
+     * Get all opportunities in a series (for cascade alerts)
+     */
+    public getOpportunitiesInSeries(seriesId: string): TrackedOpportunity[] {
+        if (!seriesId) return [];
+        return this.state.opportunities.filter(opp => opp.seriesId === seriesId);
+    }
+
+    /**
+     * Get count of threshold-triggered opportunities
+     */
+    public getTriggeredCount(): number {
+        return this.state.opportunities.filter(opp => opp.status === 'threshold_triggered').length;
     }
 
     public getUnresolvedCount(): number {
