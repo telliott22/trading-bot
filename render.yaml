@@ -22,6 +22,24 @@ services:
         sync: false  # GitHub PAT for pushing CSV updates
       - key: NODE_ENV
         value: production
+      - key: CRON_MODE
+        value: "true"
+
+  # Smart Money Detector - runs 24/7 monitoring for insider trading
+  - type: worker
+    name: smart-money-detector
+    env: node
+    region: oregon
+    plan: starter  # $7/month - always on
+    buildCommand: cd agent && npm install
+    startCommand: cd agent && npx ts-node src/smart-money/index.ts
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: NODE_ENV
+        value: production
 
   # Dashboard - static site
   - type: web

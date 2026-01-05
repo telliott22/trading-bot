@@ -6,6 +6,7 @@
 
 import { Notifier } from '../notifications';
 import { Anomaly, AnomalySeverity, MarketInfo, DetectionConfig, DEFAULT_CONFIG } from './types';
+import { AlertStore } from './alert-store';
 
 interface AlertRecord {
     anomalyType: string;
@@ -19,10 +20,19 @@ export class AlertManager {
     private recentAlerts: Map<string, number> = new Map(); // key -> lastAlertTime
     private alertCount: number = 0;
     private alertCountResetTime: number = Date.now();
+    private alertStore: AlertStore;
 
     constructor(notifier: Notifier, config: Partial<DetectionConfig> = {}) {
         this.notifier = notifier;
         this.config = { ...DEFAULT_CONFIG, ...config };
+        this.alertStore = new AlertStore();
+    }
+
+    /**
+     * Get the alert store for external access
+     */
+    getAlertStore(): AlertStore {
+        return this.alertStore;
     }
 
     /**
@@ -51,6 +61,9 @@ export class AlertManager {
             // Use the raw send method to avoid the info emoji prefix
             await this.sendRaw(message);
 
+            // Store alert in JSON file
+            this.alertStore.addAlert(anomaly);
+
             // Update tracking
             this.recentAlerts.set(key, Date.now());
             this.alertCount++;
@@ -61,6 +74,13 @@ export class AlertManager {
             console.error('Failed to send alert:', error);
             return false;
         }
+    }
+
+    /**
+     * Push alerts to GitHub (call periodically)
+     */
+    async pushAlerts(): Promise<void> {
+        await this.alertStore.pushToGitHub();
     }
 
     /**

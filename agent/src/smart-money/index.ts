@@ -20,6 +20,7 @@ dotenv.config();
 
 import { Notifier } from '../notifications';
 import { SmartMoneyDetector } from './detector';
+import { HealthServer } from './health-server';
 import { DEFAULT_CONFIG } from './types';
 
 async function main() {
@@ -61,8 +62,16 @@ async function main() {
     // Create and start detector
     const detector = new SmartMoneyDetector(notifier, config);
 
+    // Get the alert store from the detector for the health server
+    const alertStore = detector.getAlertStore();
+
+    // Start health server
+    const healthPort = parseInt(process.env.PORT || '3001', 10);
+    const healthServer = new HealthServer(detector, alertStore, healthPort);
+
     try {
         await detector.start();
+        healthServer.start();
 
         // Send startup notification
         if (telegramConfigured) {

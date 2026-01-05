@@ -53,6 +53,13 @@ export class SmartMoneyDetector {
     }
 
     /**
+     * Get the alert store for external access (e.g., health server)
+     */
+    getAlertStore() {
+        return this.alertManager.getAlertStore();
+    }
+
+    /**
      * Start the detector
      */
     async start(): Promise<void> {
@@ -439,6 +446,11 @@ export class SmartMoneyDetector {
         setInterval(() => {
             this.refreshMarkets();
         }, 30 * 60 * 1000);
+
+        // Push alerts to GitHub every hour
+        setInterval(() => {
+            this.alertManager.pushAlerts();
+        }, 60 * 60 * 1000);
     }
 
     /**
