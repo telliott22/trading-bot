@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import Papa from "papaparse";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -36,7 +36,9 @@ import {
   Target,
   HelpCircle,
   CheckCircle,
+  AlertTriangle,
 } from "lucide-react";
+import { SmartMoneyAlerts } from "@/components/SmartMoneyAlerts";
 
 interface Prediction {
   timestamp: string;
@@ -78,6 +80,7 @@ export default function Dashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [mainTab, setMainTab] = useState<"predictions" | "smart-money">("predictions");
 
   useEffect(() => {
     const CSV_URL = "https://raw.githubusercontent.com/telliott22/trading-bot/main/dashboard/public/predictions.csv";
@@ -246,15 +249,30 @@ export default function Dashboard() {
                   Polymarket Signals
                 </h1>
                 <p className="text-sm text-zinc-500">
-                  AI-powered market correlations
+                  AI-powered trading intelligence
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-4">
-              <div className="text-right">
-                <p className="text-xs text-zinc-500">Last updated</p>
-                <p className="text-sm text-zinc-300 font-mono">{formatLastUpdated(lastUpdated)}</p>
-              </div>
+              {/* Main Navigation Tabs */}
+              <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as typeof mainTab)}>
+                <TabsList className="bg-zinc-900 border border-zinc-800 p-1">
+                  <TabsTrigger
+                    value="predictions"
+                    className="data-[state=active]:bg-emerald-600 data-[state=active]:text-white px-4"
+                  >
+                    <TrendingUp className="h-4 w-4 mr-2" />
+                    Predictions
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="smart-money"
+                    className="data-[state=active]:bg-red-600 data-[state=active]:text-white px-4"
+                  >
+                    <AlertTriangle className="h-4 w-4 mr-2" />
+                    Smart Money
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                 <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
                 <span className="text-sm text-emerald-400 font-medium">
@@ -267,6 +285,12 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Smart Money Tab */}
+        {mainTab === "smart-money" && <SmartMoneyAlerts />}
+
+        {/* Predictions Tab */}
+        {mainTab === "predictions" && (
+          <>
         {/* Stats Cards */}
         <div className="grid grid-cols-4 gap-4 mb-8">
           <Card className="bg-zinc-900/50 border-zinc-800">
@@ -765,6 +789,8 @@ export default function Dashboard() {
             </div>
           )}
         </Card>
+          </>
+        )}
       </main>
     </div>
   );
